@@ -17,6 +17,13 @@ export contains property addresses and every other tab of the workbook.
 password. That was a deliberate call — revisit it if listing-level revenue data
 ever needs to be private, since a private repo does *not* make a Pages site private.
 
+## Cadence
+
+Collection and publish run **Monday and Thursday mornings** as scheduled Claude
+Code tasks (see `RUNBOOK.md`). Monday also drafts the client email; Thursday
+drafts the internal Admin Review email. Drafts land in `drafts/` (gitignored)
+for Mike to review and send by hand — sending is never automated.
+
 ## Running a collection
 
 Python is not on PATH on the build machine. Use the full interpreter path:

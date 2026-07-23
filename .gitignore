@@ -3,6 +3,9 @@
 # repo that serves a public site. Only site/data/ is published.
 /data/
 
+# Email drafts are working documents for Mike's review, never published.
+/drafts/
+
 # Python
 __pycache__/
 *.pyc
