@@ -1,0 +1,130 @@
+{
+ "generated_at": "2026-07-23T12:52:48.576248+00:00",
+ "reconciliation": [
+  {
+   "kind": "name_mismatch",
+   "name": "Slacker Bear's Creek Retreat - New Listing",
+   "detail": "Sheet name differs from Wheelhouse title 'Slacker Bear's Creek Retreat New Listing'",
+   "wh_id": "63635894"
+  }
+ ],
+ "config_issues": [
+  {
+   "name": "A Great Escape",
+   "wh_id": 51058516,
+   "issues": [
+    "No max price set"
+   ]
+  },
+  {
+   "name": "A View To Remember",
+   "wh_id": 51062120,
+   "issues": [
+    "No max price set"
+   ]
+  },
+  {
+   "name": "Bear Hugs",
+   "wh_id": 51058562,
+   "issues": [
+    "No base price set",
+    "No max price set"
+   ]
+  },
+  {
+   "name": "Blue Heaven",
+   "wh_id": 51058578,
+   "issues": [
+    "No base price set",
+    "No max price set"
+   ]
+  },
+  {
+   "name": "Cozy Bear Hill",
+   "wh_id": 51058594,
+   "issues": [
+    "No base price set",
+    "No max price set"
+   ]
+  },
+  {
+   "name": "Heavenly Bear",
+   "wh_id": 51058634,
+   "issues": [
+    "No max price set"
+   ]
+  },
+  {
+   "name": "Hook Line & Sinker",
+   "wh_id": 51058648,
+   "issues": [
+    "No max price set"
+   ]
+  },
+  {
+   "name": "Ober Hideaway",
+   "wh_id": 51062078,
+   "issues": [
+    "No max price set"
+   ]
+  },
+  {
+   "name": "Picture Perfect",
+   "wh_id": 51059382,
+   "issues": [
+    "No max price set"
+   ]
+  }
+ ],
+ "new_no_forward_data": [
+  {
+   "name": "Bear Necessities Lodge - New Listing",
+   "wh_id": 60770178,
+   "last_booked_at": null,
+   "reason": "Brand new - no bookings yet"
+  },
+  {
+   "name": "Cozy Haven",
+   "wh_id": 51086624,
+   "last_booked_at": "2026-03-27T10:11:35.000-07:00",
+   "reason": "Calendar appears fully blocked - last booked 2026-03-27"
+  },
+  {
+   "name": "Family Oasis",
+   "wh_id": 51086517,
+   "last_booked_at": "2026-04-22T11:46:45.000-07:00",
+   "reason": "Calendar appears fully blocked - last booked 2026-04-22"
+  },
+  {
+   "name": "The Bird Hallar - New Listing",
+   "wh_id": 63978760,
+   "last_booked_at": null,
+   "reason": "Brand new - no bookings yet"
+  },
+  {
+   "name": "The Outdoor Oasis",
+   "wh_id": 51059327,
+   "last_booked_at": "2026-06-21T10:26:55.000-07:00",
+   "reason": "Calendar appears fully blocked - last booked 2026-06-21"
+  },
+  {
+   "name": "The Woodlands in TN",
+   "wh_id": 60904024,
+   "last_booked_at": "2026-05-20T05:56:01.000-07:00",
+   "reason": "Calendar appears fully blocked - last booked 2026-05-20"
+  },
+  {
+   "name": "Twin Peaks Unit 1",
+   "wh_id": 51084763,
+   "last_booked_at": "2026-04-21T12:58:35.000-07:00",
+   "reason": "Calendar appears fully blocked - last booked 2026-04-21"
+  },
+  {
+   "name": "Twin Peaks Unit 2",
+   "wh_id": 51084852,
+   "last_booked_at": "2026-05-07T04:47:15.000-07:00",
+   "reason": "Calendar appears fully blocked - last booked 2026-05-07"
+  }
+ ],
+ "kpi_failures": []
+}

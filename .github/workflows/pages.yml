@@ -1,0 +1,43 @@
+name: Deploy dashboard to GitHub Pages
+
+# Publishes the contents of site/ only. Everything under data/ is gitignored
+# and never reaches the runner.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deploy finish rather than cancelling it mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail if the snapshot is missing
+        run: |
+          test -f site/data/snapshot.json || { echo "site/data/snapshot.json not committed"; exit 1; }
+          test -f site/data/admin.json   || { echo "site/data/admin.json not committed";   exit 1; }
+          python3 -c "import json,sys; [json.load(open(f)) for f in ('site/data/snapshot.json','site/data/admin.json')]"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

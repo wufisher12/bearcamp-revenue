@@ -1,0 +1,16 @@
+# Raw collection intermediates stay local. The sheet export carries property
+# addresses and every other tab of the workbook, none of which belongs in a
+# repo that serves a public site. Only site/data/ is published.
+/data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bear Camp Revenue</title>
+<style>
+  /* Fisher Vacation Rental Services palette.
+     Brand red is reserved for the logo - status colours stay semantic so the
+     market column never competes with branding. */
+  :root {
+    --navy: #003157; --red: #ff0013; --gold: #c8952c;
+    --bg: #f4f5f7; --card: #ffffff; --line: #e2e5ea; --ink: #003157;
+    --muted: #5f6b78; --accent: #003157;
+    /* Brand gold (#c8952c) is only 2.4:1 on white, so status text uses a
+       darkened tone of it. The pure brand gold stays for decoration. */
+    --hot: #9e3b2f; --warm: #8a6318; --good: #2f6d54;
+    --panel: #eef0f4; --chip: #e7ebf1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1a24; --card: #14232f; --line: #24384a; --ink: #e6edf3;
+      --muted: #93a4b4; --accent: #5b9bd5;
+      --hot: #d97a68; --warm: #d9a94e; --good: #63b48d;
+      --panel: #172936; --chip: #1e3446;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 Arial, Helvetica, sans-serif;
+  }
+  header { padding: 18px 24px 0; }
+  .brand { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .brand img { height: 52px; width: auto; }
+  .brand .rule { width: 1px; height: 38px; background: var(--line); }
+  h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: var(--navy); }
+  @media (prefers-color-scheme: dark) { h1 { color: var(--ink); } }
+  .stamp { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; }
+  .stat {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 12px; min-width: 108px; border-top: 3px solid var(--navy);
+  }
+  .stat b { display: block; font-size: 19px; font-weight: 700; color: var(--navy); }
+  @media (prefers-color-scheme: dark) {
+    .stat { border-top-color: var(--accent); }
+    .stat b { color: var(--ink); }
+  }
+  .stat span { color: var(--muted); font-size: 12px; }
+  nav { display: flex; flex-wrap: wrap; gap: 4px; padding: 16px 24px 0; border-bottom: 1px solid var(--line); }
+  nav button {
+    background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+    font: inherit; font-size: 14px; padding: 8px 12px; cursor: pointer; margin-bottom: -1px;
+  }
+  nav button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--gold); font-weight: 700; }
+  nav button:hover { color: var(--accent); }
+  main { padding: 18px 24px 60px; }
+  section[hidden] { display: none; }
+  .intro { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; max-width: 74ch; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  input[type="search"], select {
+    background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 14px;
+  }
+  input[type="search"] { min-width: 220px; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; background: var(--card); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 11px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th {
+    background: var(--navy); color: #ffffff; font-weight: 700; font-size: 12.5px;
+    position: sticky; top: 0; cursor: pointer; user-select: none;
+  }
+  @media (prefers-color-scheme: dark) { th { background: var(--panel); color: var(--ink); } }
+  th.nosort { cursor: default; }
+  th[aria-sort="ascending"]::after { content: " \2191"; color: var(--gold); }
+  th[aria-sort="descending"]::after { content: " \2193"; color: var(--gold); }
+  tbody tr:nth-child(even) { background: var(--panel); }
+  tbody tr:hover { background: var(--chip); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.name { white-space: normal; min-width: 190px; font-weight: 550; }
+  td.why { white-space: normal; min-width: 320px; color: var(--muted); font-size: 13px; }
+  td.why div { margin: 1px 0; }
+  /* Scoped to td so they never override the header's own colours. */
+  td.rank { color: var(--muted); font-variant-numeric: tabular-nums; }
+  td.score { font-weight: 700; color: var(--navy); }
+  @media (prefers-color-scheme: dark) { td.score { color: var(--ink); } }
+  .hot { color: var(--hot); } .warm { color: var(--warm); } .good { color: var(--good); }
+  .chip {
+    display: inline-block; background: var(--chip); border-radius: 5px;
+    padding: 1px 7px; font-size: 12px; margin: 1px 3px 1px 0;
+  }
+  .empty { padding: 22px; color: var(--muted); }
+  .admingroup { margin-bottom: 24px; }
+  .admingroup h3 {
+    font-size: 14.5px; margin: 0 0 3px; color: var(--navy);
+    border-left: 3px solid var(--gold); padding-left: 8px;
+  }
+  @media (prefers-color-scheme: dark) { .admingroup h3 { color: var(--ink); } }
+  .admingroup p.note { color: var(--muted); font-size: 13px; margin: 0 0 9px; max-width: 74ch; }
+  footer { color: var(--muted); font-size: 12.5px; padding: 0 24px 40px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img src="assets/fvrs-logo.png" alt="Fisher Vacation Rental Services">
+    <div class="rule"></div>
+    <div>
+      <h1>Bear Camp Revenue</h1>
+      <div class="stamp" id="stamp">Loading…</div>
+    </div>
+  </div>
+  <div class="summary" id="summary"></div>
+</header>
+
+<nav id="tabs">
+  <button data-tab="low" aria-selected="true">Review Pricing (Low Pacing)</button>
+  <button data-tab="high" aria-selected="false">Review Pricing (High Pacing)</button>
+  <button data-tab="portfolio" aria-selected="false">Portfolio by Bedroom</button>
+  <button data-tab="admin" aria-selected="false">Admin Review</button>
+</nav>
+
+<main>
+  <section id="tab-low">
+    <p class="intro">The 25 listings most in need of pricing attention, ranked by revenue urgency.
+      Occupancy over the next 30 days is the primary driver; a listing below 1.00x its Wheelhouse
+      neighborhood is also losing to its own market. Config problems never affect this ranking —
+      they live in Admin Review.</p>
+    <div class="controls">
+      <input type="search" id="low-filter" placeholder="Filter by name or city…" aria-label="Filter listings">
+      <select id="low-br" aria-label="Filter by bedrooms"><option value="">All bedroom counts</option></select>
+      <select id="low-mkt" aria-label="Filter by market position">
+        <option value="">All market positions</option>
+        <option value="below">Below market only</option>
+        <option value="above">At or above market only</option>
+      </select>
+    </div>
+    <div class="tablewrap"><table id="low-table"></table></div>
+  </section>
+
+  <section id="tab-high" hidden>
+    <p class="intro">Listings selling strongly <em>and</em> beating their market, where the minimum
+      price is capping the rate. These are raise-the-min candidates — money being left on the table,
+      not problems. Ranked by upside potential (occupancy, how often the floor binds, market strength).</p>
+    <div class="controls">
+      <input type="search" id="high-filter" placeholder="Filter by name or city…" aria-label="Filter listings">
+      <select id="high-br" aria-label="Filter by bedrooms"><option value="">All bedroom counts</option></select>
+    </div>
+    <div class="tablewrap"><table id="high-table"></table></div>
+  </section>
+
+  <section id="tab-portfolio" hidden>
+    <p class="intro">Forward-looking medians by bedroom count across the scored book. Occupancy is
+      adjusted (paid nights over bookable nights), so owner blocks don't distort it.</p>
+    <div class="tablewrap"><table id="portfolio-table"></table></div>
+  </section>
+
+  <section id="tab-admin" hidden>
+    <p class="intro">Configuration and data-integrity issues. Deliberately kept out of the pricing
+      lists — these are a different workstream.</p>
+    <div id="admin-body"></div>
+  </section>
+</main>
+
+<footer id="footer"></footer>
+
+<script>
+const pct = v => v == null ? "—" : Math.round(v * 100) + "%";
+const mult = v => v == null ? "—" : v.toFixed(2) + "x";
+const money = v => v == null ? "—" : "$" + Math.round(v).toLocaleString();
+const num = v => v == null ? "—" : Math.round(v).toLocaleString();
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function marketClass(r) {
+  if (r == null) return "";
+  if (r < 0.70) return "hot";
+  if (r < 1.00) return "warm";
+  return "good";
+}
+
+/* Generic sortable table. cols: {key, label, cls, get, render, sortable} */
+function renderTable(el, cols, rows, state) {
+  const head = "<thead><tr>" + cols.map((c, i) =>
+    `<th class="${c.cls || ""}${c.sortable === false ? " nosort" : ""}" data-col="${i}"` +
+    (state.sortCol === i ? ` aria-sort="${state.sortDir > 0 ? "ascending" : "descending"}"` : "") +
+    `>${esc(c.label)}</th>`).join("") + "</tr></thead>";
+
+  let data = rows.slice();
+  if (state.sortCol != null) {
+    const c = cols[state.sortCol];
+    data.sort((a, b) => {
+      const x = c.get(a), y = c.get(b);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      const r = typeof x === "string" ? x.localeCompare(y) : x - y;
+      return r * state.sortDir;
+    });
+  }
+
+  const body = data.length
+    ? "<tbody>" + data.map(r => "<tr>" + cols.map(c =>
+        `<td class="${c.cls || ""}">${c.render(r)}</td>`).join("") + "</tr>").join("") + "</tbody>"
+    : `<tbody><tr><td class="empty" colspan="${cols.length}">No listings match this filter.</td></tr></tbody>`;
+
+  el.innerHTML = head + body;
+  el.querySelectorAll("th:not(.nosort)").forEach(th => {
+    th.onclick = () => {
+      const i = +th.dataset.col;
+      if (state.sortCol === i) state.sortDir *= -1;
+      else { state.sortCol = i; state.sortDir = cols[i].defaultDir ?? -1; }
+      renderTable(el, cols, rows, state);
+    };
+  });
+}
+
+function bedroomOptions(sel, rows) {
+  [...new Set(rows.map(r => r.bedrooms).filter(b => b != null))].sort((a, b) => a - b)
+    .forEach(b => sel.insertAdjacentHTML("beforeend", `<option value="${b}">${b} BR</option>`));
+}
+
+Promise.all([
+  fetch("data/snapshot.json").then(r => r.json()),
+  fetch("data/admin.json").then(r => r.json())
+]).then(([snap, admin]) => {
+  const when = new Date(snap.generated_at);
+  document.getElementById("stamp").textContent =
+    "Forward-looking snapshot — collected " + when.toLocaleString();
+  document.getElementById("footer").textContent =
+    "Wheelhouse KPIs joined to the Unit Mix sheet by WH ID. Market position uses the 0–60 day " +
+    "neighborhood ratio; all other metrics are 30-day. Snapshot overwrites daily.";
+
+  const c = snap.counts, p = snap.pacing;
+  document.getElementById("summary").innerHTML = [
+    [c.scored, "listings scored"],
+    [c.sheet_active, "active on sheet"],
+    [p.portfolio_median.toFixed(2) + "x", "median vs market"],
+    [p.below_market, "below market"],
+    [c.upside_candidates, "raise-min candidates"],
+    [c.new_no_forward_data, "no forward data"]
+  ].map(([v, l]) => `<div class="stat"><b>${esc(v)}</b><span>${esc(l)}</span></div>`).join("");
+
+  /* ---- Low pacing ---- */
+  const lowCols = [
+    { label: "#", cls: "rank num", sortable: false, get: () => 0,
+      render: r => snap.low_pacing.indexOf(r) + 1 },
+    { label: "Score", cls: "num score", defaultDir: -1, get: r => r.priority_score,
+      render: r => r.priority_score },
+    { label: "Listing", cls: "name", defaultDir: 1, get: r => r.name, render: r => esc(r.name) },
+    { label: "City", get: r => r.city || "", render: r => esc(r.city || "—") },
+    { label: "BR", cls: "num", get: r => r.bedrooms, render: r => r.bedrooms ?? "—" },
+    { label: "Occ 30d", cls: "num", get: r => r.occ_adj_0_30, render: r => pct(r.occ_adj_0_30) },
+    { label: "Market 60d", cls: "num", get: r => r.nbhd_ratio_0_60,
+      render: r => `<span class="${marketClass(r.nbhd_ratio_0_60)}">${mult(r.nbhd_ratio_0_60)}</span>` },
+    { label: "Pickup 7/14", cls: "num", get: r => r.pickup_14,
+      render: r => `${r.pickup_7 ?? "—"}/${r.pickup_14 ?? "—"}` },
+    { label: "Floor hits", cls: "num", get: r => r.min_price_hits_0_30,
+      render: r => (r.min_price_hits_0_30 ?? 0) + "/30" },
+    { label: "Open", cls: "num", get: r => r.nights_available_0_30,
+      render: r => num(r.nights_available_0_30) },
+    { label: "Min", cls: "num", get: r => r.min_price, render: r => money(r.min_price) },
+    { label: "Why it's here", cls: "why", sortable: false, get: () => 0,
+      render: r => r.flag_labels.map(f => `<div>${esc(f)}</div>`).join("") }
+  ];
+  const lowState = { sortCol: 1, sortDir: -1 };
+  const lowEl = document.getElementById("low-table");
+  const lowFilter = document.getElementById("low-filter");
+  const lowBr = document.getElementById("low-br");
+  const lowMkt = document.getElementById("low-mkt");
+  bedroomOptions(lowBr, snap.low_pacing);
+
+  function drawLow() {
+    const q = lowFilter.value.trim().toLowerCase();
+    const br = lowBr.value, mk = lowMkt.value;
+    const rows = snap.low_pacing.filter(r => {
+      if (q && !((r.name + " " + (r.city || "")).toLowerCase().includes(q))) return false;
+      if (br && String(r.bedrooms) !== br) return false;
+      const ratio = r.nbhd_ratio_0_60;
+      if (mk === "below" && !(ratio != null && ratio < p.at_market)) return false;
+      if (mk === "above" && !(ratio != null && ratio >= p.at_market)) return false;
+      return true;
+    });
+    renderTable(lowEl, lowCols, rows, lowState);
+  }
+  [lowFilter, lowBr, lowMkt].forEach(el => el.addEventListener("input", drawLow));
+  drawLow();
+
+  /* ---- High pacing ---- */
+  const highCols = [
+    { label: "#", cls: "rank num", sortable: false, get: () => 0,
+      render: r => snap.high_pacing.indexOf(r) + 1 },
+    { label: "Upside", cls: "num score", defaultDir: -1, get: r => r.upside_score,
+      render: r => r.upside_score },
+    { label: "Listing", cls: "name", defaultDir: 1, get: r => r.name, render: r => esc(r.name) },
+    { label: "City", get: r => r.city || "", render: r => esc(r.city || "—") },
+    { label: "BR", cls: "num", get: r => r.bedrooms, render: r => r.bedrooms ?? "—" },
+    { label: "Occ 30d", cls: "num", get: r => r.occ_adj_0_30, render: r => pct(r.occ_adj_0_30) },
+    { label: "Market 60d", cls: "num", get: r => r.nbhd_ratio_0_60,
+      render: r => `<span class="good">${mult(r.nbhd_ratio_0_60)}</span>` },
+    { label: "Floor hits", cls: "num", get: r => r.min_price_hits_0_30,
+      render: r => (r.min_price_hits_0_30 ?? 0) + "/30" },
+    { label: "Min", cls: "num", get: r => r.min_price, render: r => money(r.min_price) },
+    { label: "ADR 30d", cls: "num", get: r => r.adr_0_30, render: r => money(r.adr_0_30) },
+    { label: "Asking 30d", cls: "num", get: r => r.asking_0_30, render: r => money(r.asking_0_30) },
+    { label: "Opportunity", cls: "why", sortable: false, get: () => 0,
+      render: r => r.upside_labels.map(f => `<div>${esc(f)}</div>`).join("") }
+  ];
+  const highState = { sortCol: 1, sortDir: -1 };
+  const highEl = document.getElementById("high-table");
+  const highFilter = document.getElementById("high-filter");
+  const highBr = document.getElementById("high-br");
+  bedroomOptions(highBr, snap.high_pacing);
+
+  function drawHigh() {
+    const q = highFilter.value.trim().toLowerCase();
+    const br = highBr.value;
+    const rows = snap.high_pacing.filter(r => {
+      if (q && !((r.name + " " + (r.city || "")).toLowerCase().includes(q))) return false;
+      if (br && String(r.bedrooms) !== br) return false;
+      return true;
+    });
+    renderTable(highEl, highCols, rows, highState);
+  }
+  [highFilter, highBr].forEach(el => el.addEventListener("input", drawHigh));
+  drawHigh();
+
+  /* ---- Portfolio ---- */
+  const portCols = [
+    { label: "Bedrooms", defaultDir: 1, get: r => r.bedrooms, render: r => r.bedrooms + " BR" },
+    { label: "Units", cls: "num", get: r => r.listings, render: r => r.listings },
+    { label: "Median occ 30d", cls: "num", get: r => r.median_occ_0_30, render: r => pct(r.median_occ_0_30) },
+    { label: "Median occ 60d", cls: "num", get: r => r.median_occ_0_60, render: r => pct(r.median_occ_0_60) },
+    { label: "Median vs market", cls: "num", get: r => r.median_market_0_60,
+      render: r => `<span class="${marketClass(r.median_market_0_60)}">${mult(r.median_market_0_60)}</span>` },
+    { label: "Median ADR", cls: "num", get: r => r.median_adr_0_30, render: r => money(r.median_adr_0_30) },
+    { label: "Median RevPAR", cls: "num", get: r => r.median_revpar_0_30, render: r => money(r.median_revpar_0_30) },
+    { label: "Below market", cls: "num", get: r => r.below_market, render: r => r.below_market },
+    { label: "Open nights 30d", cls: "num", get: r => r.nights_available_0_30, render: r => num(r.nights_available_0_30) }
+  ];
+  renderTable(document.getElementById("portfolio-table"), portCols,
+    snap.portfolio_by_bedroom, { sortCol: 0, sortDir: 1 });
+
+  /* ---- Admin ---- */
+  const KINDS = {
+    name_mismatch: ["Name mismatches", "Sheet name and Wheelhouse title have drifted apart. The ID resolves, so pricing is unaffected."],
+    bad_wh_id: ["Unresolved WH IDs", "The sheet carries a WH ID that does not exist in Wheelhouse."],
+    missing_wh_id: ["Missing WH IDs", "No WH ID on the sheet row, so it cannot be joined reliably."],
+    orphan: ["Orphaned in Wheelhouse", "Automation is ON in Wheelhouse but the listing is not on the active sheet. Intentional exclusions are already suppressed."]
+  };
+  const groups = {};
+  (admin.reconciliation || []).forEach(i => (groups[i.kind] = groups[i.kind] || []).push(i));
+
+  let html = "";
+  for (const [kind, items] of Object.entries(groups)) {
+    const [title, note] = KINDS[kind] || [kind, ""];
+    html += `<div class="admingroup"><h3>${esc(title)} (${items.length})</h3>` +
+      `<p class="note">${esc(note)}</p><div class="tablewrap"><table><thead><tr>` +
+      `<th class="nosort">Listing</th><th class="nosort">WH ID</th><th class="nosort">Detail</th>` +
+      `</tr></thead><tbody>` + items.map(i =>
+        `<tr><td class="name">${esc(i.name)}</td><td>${esc(i.wh_id ?? "—")}</td>` +
+        `<td class="why">${esc(i.detail)}</td></tr>`).join("") +
+      `</tbody></table></div></div>`;
+  }
+
+  if (admin.config_issues?.length) {
+    html += `<div class="admingroup"><h3>Pricing configuration (${admin.config_issues.length})</h3>` +
+      `<p class="note">Automation or price bounds are incomplete. A missing max lets the ceiling float; ` +
+      `a missing base means the floor is doing all the work.</p>` +
+      `<div class="tablewrap"><table><thead><tr><th class="nosort">Listing</th>` +
+      `<th class="nosort">WH ID</th><th class="nosort">Issues</th></tr></thead><tbody>` +
+      admin.config_issues.map(i =>
+        `<tr><td class="name">${esc(i.name)}</td><td>${esc(i.wh_id ?? "—")}</td>` +
+        `<td class="why">${i.issues.map(x => `<span class="chip">${esc(x)}</span>`).join("")}</td></tr>`
+      ).join("") + `</tbody></table></div></div>`;
+  }
+
+  if (admin.new_no_forward_data?.length) {
+    html += `<div class="admingroup"><h3>No forward data (${admin.new_no_forward_data.length})</h3>` +
+      `<p class="note">Wheelhouse returns no forward occupancy for these, so they are excluded from ` +
+      `both pricing lists. A listing that has never booked is genuinely new; one with booking history ` +
+      `is a calendar someone closed out — only the second kind is worth chasing.</p>` +
+      `<div class="tablewrap"><table><thead><tr>` +
+      `<th class="nosort">Listing</th><th class="nosort">WH ID</th><th class="nosort">Reason</th>` +
+      `</tr></thead><tbody>` +
+      admin.new_no_forward_data.map(i =>
+        `<tr><td class="name">${esc(i.name)}</td><td>${esc(i.wh_id ?? "—")}</td>` +
+        `<td class="why">${esc(i.reason ?? "")}</td></tr>`).join("") +
+      `</tbody></table></div></div>`;
+  }
+
+  const fails = admin.kpi_failures || [];
+  html += `<div class="admingroup"><h3>Collection status</h3><p class="note">` +
+    (fails.length
+      ? `${fails.length} listing(s) failed to return KPIs this run and are showing stale or no data: ` +
+        esc(fails.map(f => f.name).join(", ")) + "."
+      : `All ${c.kpis_collected} listings returned fresh KPIs this run. No stale data.`) +
+    `</p></div>`;
+
+  document.getElementById("admin-body").innerHTML = html;
+}).catch(err => {
+  document.getElementById("stamp").textContent =
+    "Could not load snapshot data — run the collector, then serve this folder over HTTP. (" + err + ")";
+});
+
+document.getElementById("tabs").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-tab]");
+  if (!btn) return;
+  document.querySelectorAll("#tabs button").forEach(b =>
+    b.setAttribute("aria-selected", String(b === btn)));
+  ["low", "high", "portfolio", "admin"].forEach(t =>
+    document.getElementById("tab-" + t).hidden = (t !== btn.dataset.tab));
+});
+</script>
+</body>
+</html>
