@@ -125,10 +125,11 @@ admin_out = {
     # someone closed out. Only the second kind is worth chasing.
     "new_no_forward_data": [
         {"name": r["name"], "wh_id": r["wh_id"],
-         "last_booked_at": r.get("last_booked_at"),
-         "reason": ("Brand new - no bookings yet" if not r.get("last_booked_at")
-                    else "Calendar appears fully blocked - last booked %s"
-                         % str(r["last_booked_at"])[:10])}
+         "last_booked_days": r.get("last_booked_days"),
+         "reason": ("Brand new - no bookings yet"
+                    if r.get("last_booked_days") is None
+                    else "Calendar appears fully blocked - last booked %d days ago"
+                         % int(r["last_booked_days"]))}
         for r in new_listings
     ],
     "kpi_failures": failed + missing,

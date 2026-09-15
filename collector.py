@@ -14,7 +14,6 @@ Changes from v2 (Mike, 2026-07-22):
 """
 import re
 import json
-from datetime import datetime, timezone
 
 WINDOW_NIGHTS = 30
 
@@ -155,18 +154,6 @@ def g(d, *path, default=None):
     return cur
 
 
-def days_since(ts):
-    if not ts:
-        return None
-    try:
-        dt = datetime.fromisoformat(str(ts))
-    except (ValueError, TypeError):
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - dt).days
-
-
 def extract(pair, kpi):
     sheet, wh = pair["sheet"], pair["wh"]
     p = wh.get("listing_preferences", {})
@@ -190,8 +177,11 @@ def extract(pair, kpi):
         "pickup_7": g(kpi, "pickup", "7_0"),
         "pickup_14": g(kpi, "pickup", "14_0"),
         "pickup_30": g(kpi, "pickup", "30_0"),
-        "last_booked_at": kpi.get("last_booked_at"),
-        "days_since_booking": days_since(kpi.get("last_booked_at")),
+        # REST API exposes numeric last_booked_days (windowed), not a
+        # timestamp. Trailing windows all carry the same value; take the
+        # widest lookback. None => the listing has never booked.
+        "last_booked_days": g(kpi, "last_booked_days", "365_0"),
+        "days_since_booking": g(kpi, "last_booked_days", "365_0"),
 
         "asking_0_30": g(kpi, "asking_rate", "0_30"),
         "adr_0_30": g(kpi, "adr", "0_30"),

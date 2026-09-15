@@ -6,6 +6,18 @@
 # Email drafts are working documents for Mike's review, never published.
 /drafts/
 
+# Secrets. NOTE: naming a file "*.gitignore" does NOT make git ignore it -
+# only a file named exactly ".gitignore" is special. These are explicit.
+.env
+.env.*
+*.env
+WHEELHOUSE_API_KEY*
+*api_key*
+*apikey*
+*secret*
+*credentials*
+*service-account*.json
+
 # Python
 __pycache__/
 *.pyc
