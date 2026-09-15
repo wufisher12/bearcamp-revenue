@@ -1,80 +1,60 @@
 # Bear Camp Revenue
 
-Morning revenue triage for Bear Camp Cabin Rentals — pulls fresh Wheelhouse data
-for the active portfolio, reconciles it against the authoritative Google Sheet,
-scores each listing for revenue urgency, and publishes a static dashboard.
+Revenue triage for Bear Camp Cabin Rentals (~287 active listings, Smokies).
+Nightly Wheelhouse collection into an append-only store; a Monday ritual builds
+the review views, drafts the client email, and rings a Slack doorbell.
 
-## What's published
+Product spec: `../PRODUCT-V2.md`. Data contract: `../DATA-CONTRACT.md`.
+Operations: `RUNBOOK.md`. Verified API surface: `API-FINDINGS.md`.
 
-GitHub Pages serves **`site/` only**. That is the dashboard plus two derived JSON
-files (`site/data/snapshot.json`, `site/data/admin.json`) holding listing names,
-city, bedroom count, price bounds and forward-looking KPIs.
+## Non-negotiables
 
-Everything under `data/` is gitignored and never leaves the machine — the sheet
-export contains property addresses and every other tab of the workbook.
+- **Rent revenue only.** Fee data is corrupt upstream (Brightside → both the
+  sheet export and Wheelhouse). Fee fields are refused at collection and at
+  the sheet reader, not merely ignored.
+- **Arrival-date attribution.**
+- **Only `units-defined` Active listings.** The sheet decides what is in the
+  portfolio; Wheelhouse says how it is doing.
+- **Wheelhouse is the source of record for reservations.** The sheet export
+  misses cancellations and refunds.
+- **Never send.** Client email is a Gmail draft Mike sends himself. The only
+  outbound message is a Slack doorbell to `#bear-camp` — counts and a link.
+- **Never read a `logins` tab.** Enforced by allowlist, not convention.
 
-**The published site is public.** Anyone with the URL can read it; there is no
-password. That was a deliberate call — revisit it if listing-level revenue data
-ever needs to be private, since a private repo does *not* make a Pages site private.
+## Layout
 
-## Cadence
-
-Collection and publish run **Monday and Thursday mornings** as scheduled Claude
-Code tasks (see `RUNBOOK.md`). Monday also drafts the client email; Thursday
-drafts the internal Admin Review email. Drafts land in `drafts/` (gitignored)
-for Mike to review and send by hand — sending is never automated.
-
-## Running a collection
-
-Python is not on PATH on the build machine. Use the full interpreter path:
-
-```bash
-PY=C:/Users/mfish/AppData/Local/Programs/Python/Python312-arm64/python.exe
-$PY run_recon.py        # sheet + Wheelhouse -> data/matched.json, data/admin_recon.json
-$PY make_batches.py     # split matched listings into KPI batches
-$PY make_retry_batches.py  # diff collected KPIs, emit retry batches for whatever is missing
-$PY build_snapshot.py   # score, write data/ + site/data/ payloads, print the lists
-```
-
-The sheet pull and the Wheelhouse pulls run through MCP connectors, so they are
-driven from a Claude Code session rather than from these scripts.
-
-Preview the dashboard locally (the page fetches JSON, so `file://` will not work):
-
-```bash
-$PY -m http.server 8731 --directory site
-```
-
-## Tuning the scoring
-
-Every weight and threshold is a constant in the `TUNING` block at the top of
-`collector.py`. Nothing else needs editing to re-tune.
-
-Two rules the scoring encodes deliberately:
-
-- **Beating the market is a pass.** Pacing only penalises a listing below 1.00x its
-  Wheelhouse neighbourhood, judged on the 0–60 day window. All other metrics are
-  30-day. Roughly 90% of the book beats its market, so a relative bar flagged
-  listings that were doing fine.
-- **Urgency and upside are separate lists.** `priority_score` ranks empty calendars;
-  `upside_score` ranks strong sellers whose minimum price is capping the rate. They
-  never mix, and configuration problems affect neither — those go to Admin Review.
-
-## Dashboard tabs
-
-| Tab | Contents |
+| File | Role |
 |---|---|
-| Review Pricing (Low Pacing) | 25 most urgent listings, sortable and filterable |
-| Review Pricing (High Pacing) | 10 raise-the-min candidates |
-| Portfolio by Bedroom | Forward-looking medians per bedroom tier |
-| Admin Review | Reconciliation, config gaps, blocked calendars, collection status |
+| `collect_nightly.py` | Headless nightly collector (Task Scheduler entry via `run_nightly.cmd`) |
+| `wh_api.py` | Wheelhouse REST transport — pagination, backoff, key handling |
+| `store.py` | Immutable dated snapshots + manifest under `data/snapshots/` |
+| `sheet_access.py` | Tab allowlist, sanitize-on-download, `units-defined` reader |
+| `reservations.py` | Realized YoY, on-the-books, same-point-last-year pace (rent basis) |
+| `market_tabs.py` | Parses the six-block Key Data market tabs, per bedroom size |
+| `arrivals.py` | Sheet-export fallback reader; YoY hard-limited to Oct–Dec |
+| `notify.py` | Slack doorbell message + delivery (webhook or queued for the Claude task) |
+| `site/` | Published dashboard (GitHub Pages) — **v1 views, pending v2 rebuild** |
 
-## Data notes
+Legacy, superseded by v2 and kept only until the Monday assembly replaces
+them: `collector.py`, `build_snapshot.py`, `draft_emails.py`,
+`make_batches.py`, `make_retry_batches.py`, `run_recon.py`.
 
-- The sheet is authoritative for **what exists**; Wheelhouse is authoritative for
-  **how it is pacing**. `WH ID` is the join key.
-- The active roster changes as listings onboard and leave. Never hardcode a count.
-- Wheelhouse listing pagination must run until a short page returns. An early run
-  assumed a page count and silently missed listings.
-- Null forward occupancy has two causes that must not be conflated: a listing that
-  has never booked is new; one with booking history is a closed-out calendar.
+## Running things
+
+Python is not on PATH. Use
+`C:/Users/mfish/AppData/Local/Programs/Python/Python312-arm64/python.exe`.
+
+```
+python collect_nightly.py                       # full nightly run
+python collect_nightly.py --only reservations   # one stage
+python -c "import store; print(store.coverage(7))"   # did the last 7 nights run?
+```
+
+The Wheelhouse API key comes from `WHEELHOUSE_API_KEY` or a gitignored key
+file. Everything under `data/` and `drafts/` is gitignored; only `site/` is
+published, and the published site is **public** with no password.
+
+## Publishing
+
+Pushing to `main` with changes under `site/` deploys to
+https://wufisher12.github.io/bearcamp-revenue/ via GitHub Actions.

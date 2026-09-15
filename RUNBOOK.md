@@ -1,71 +1,76 @@
-# Scheduled collection runbook
+# Runbook — Bear Camp Revenue System v2
 
-Followed by the `bearcamp-monday` and `bearcamp-thursday` scheduled tasks.
-Cadence: **Monday and Thursday mornings** (Mike's call 2026-07-23 — daily was
-overkill). Everything here is drafts-and-dashboard only; **never send email,
-never automate past Mike's review. That gate is permanent.**
+Supersedes the Mon/Thu MCP-driven runbook of 2026-07-23. Product spec is
+`../PRODUCT-V2.md`; data rules are `../DATA-CONTRACT.md` as amended by the
+directives below. The verified API surface is `API-FINDINGS.md`.
 
-Repo: `C:/Users/mfish/Desktop/bear-camp/bearcamp-revenue`
-Python (not on PATH): `C:/Users/mfish/AppData/Local/Programs/Python/Python312-arm64/python.exe`
+Python is NOT on PATH: `C:/Users/mfish/AppData/Local/Programs/Python/Python312-arm64/python.exe`
 
-## 0. Preconditions
+## Standing directives (Mike, 2026-09-03 and 2026-09-15)
 
-Check via ToolSearch that the Wheelhouse MCP (`wheelhouse_rmGetListings`,
-`wheelhouse_rmGetListingKpis`) and Drive MCP (`download_file_content`) are
-available. **If either is missing, STOP**: write `drafts/<date>-RUN-FAILED.md`
-explaining which connector was absent, and finish. Do not publish a partial
-snapshot; the site keeps serving the previous one.
+| Rule | Where enforced |
+|---|---|
+| **Rent revenue only.** Fee data is corrupt in the sheet and in Wheelhouse (same ~9x inflation, both fed from Brightside). ADR and Adjusted RevPAR are rent-based. | `collect_nightly.py` refuses `*_fees` KPI fields by assertion and drops reservation money fields other than `nightly_subtotal`; `arrivals.py` drops fee columns at the reader |
+| **Attribution by arrival date** (check-in). | `reservations.py`, `arrivals.py` |
+| **Scope = `units-defined` rows with Status == Active** (287 at 2026-09-15). Not the ~408 Wheelhouse roster. | `collect_nightly.active_targets()` |
+| **Wheelhouse is the source of record for reservations** — it reflects cancellations and refunds; the sheet export does not. Full-year YoY is allowed on this source. | `reservations.py` |
+| The sheet export (`2025-/2026-arrivals`) is a fallback only. YoY on it is **Oct–Dec only**. | `arrivals.yoy()` raises outside that window |
+| `units-defined` and the market tabs stay in the sheet — Mike maintains them. | `sheet_access.py` allowlist |
+| Slack doorbell to **#bear-camp** is allowed. Client email is a **Gmail draft, never sent**. Permanent. | `notify.py` |
+| Never read a `logins` tab. | `sheet_access.py` — allowlist + sanitize-on-download |
 
-## 1. Collect
+## Nightly (automatic, headless)
 
-1. **Sheet** (subagent): download fileId `1VzAOiE7lm8fwo4vRYpq03sdeTkizK89vbqkFqPTmzNs`
-   as xlsx via `download_file_content`, decode, parse ONLY the `Unit Mix` tab
-   (row 1 meta, row 2 headers), write all rows to `data/sheet_rows.json`.
-   Never use `read_file_content` — it truncates. Suffix duplicate headers " (2)".
-2. **Listings** (subagent): `wheelhouse_rmGetListings` with
-   `include_managed_listings: true, exclude_inactive: true, per_page: 50`,
-   paging until a short/empty page — never assume a page count. Trim each to
-   id, wheelhouse_id, title, num_bedrooms, currency, channel,
-   listing_preferences{min,base,max,automatic_rate_posting_enabled}.
-   Write `data/wh_listings.json`.
-3. `run_recon.py` → matched pairs + admin items.
-4. `make_batches.py` then `make_retry_batches.py` → KPI targets. Fresh KPIs are
-   required for ALL matched listings every run (snapshot overwrites), so before
-   batching, delete stale caches: remove all files in `data/kpis/`.
-   Then `make_retry_batches.py` emits the full target list.
-5. **KPIs** (parallel subagents, ~20 listings each): `wheelhouse_rmGetListingKpis`
-   per listing, keep only: occupancy, occupancy_adjusted, pickup, last_booked_at,
-   asking_rate, adr, revpar, revenue_score, min_price_occurrence,
-   nights_available, occupancy_neighborhood_adjusted_ratio. Retry each failed
-   call up to 3x, never abort a batch, checkpoint the output file every 5
-   listings. **Write JSON via the Write tool only — PowerShell redirects add a
-   BOM that corrupts parsing.**
-6. Re-run `make_retry_batches.py`; if listings remain, run one retry wave.
+Windows Task Scheduler task **"BearCamp Nightly Collect"** runs `run_nightly.cmd`
+at 03:00 daily. Wakes the machine, runs on battery, retries twice, and runs at
+next opportunity if the window is missed. No Claude session, no MCP.
 
-## 2. Build and verify
+It runs `collect_nightly.py`, which:
+1. Sanitizes `data/master.xlsx` → `data/master_safe.xlsx` if a fresh download is
+   present (drops every non-allowlisted tab, deletes the raw file). Otherwise runs
+   against the last sanitized copy — the roster changes slowly and Monday refreshes it.
+2. Reads Active rows from `units-defined`, pulls `/listings`, joins on WH ID.
+3. Pulls per listing: KPIs, price calendar, min/max prices, min-stay calendar,
+   custom rates, and **all reservation pages**.
+4. Writes an immutable run to `data/snapshots/<date>/` and appends to
+   `data/snapshots/index.json`. Status is `ok` / `partial` / `failed`; failures
+   are listed in `failures.json`, never dropped.
 
-- `build_snapshot.py` — writes `data/` + `site/data/` payloads, prints the lists.
-- Sanity: kpis_collected must equal unique_wh_listings; if not, list the stale
-  listings in the run report and continue (partial-run report, not a failure).
+Runtime ~60 min (~1,440 calendar/KPI calls + ~600 reservation calls at ~1.75 s
+each). Output ~2–3 MB gzipped per night. Log: `data/logs/nightly.log`.
 
-## 3. Publish
+**Check it ran:** `python -c "import store; print(store.coverage(7))"` — any
+`missing` entry is a lost night; history cannot be backfilled.
 
-- `git add site/ && git commit` (author: Mike Fisher <mike@fishergroup.co>),
-  message like "Snapshot YYYY-MM-DD". Then `git push origin main`
-  (credentials are cached; the push triggers the Pages deploy).
-- Verify https://wufisher12.github.io/bearcamp-revenue/ serves the new
-  `generated_at` (allow a few minutes for the deploy).
+Manual run / subset: `python collect_nightly.py [--only kpis,reservations] [--limit N]`.
 
-## 4. Email draft
+## Monday assembly (to be built — PRODUCT-V2 §1)
 
-- **Monday:** `draft_emails.py client` → `drafts/<date>-client-email.md`
-- **Thursday:** `draft_emails.py team` → `drafts/<date>-team-admin-email.md`
-- Light copy-editing of the generated draft is fine; adding claims not present
-  in the data is not. Leave the file for Mike to review and send himself.
+Runs as a Claude scheduled task because it needs the Drive connector:
+1. Download the master sheet to `data/master.xlsx` (Drive `download_file_content`,
+   xlsx export — never `read_file_content`). The collector sanitizes it.
+2. Build the Monday Checklist from the last 7 good snapshots + market tabs.
+3. Publish `site/` (push to `main` triggers Pages).
+4. Post the doorbell — `notify.build_message()`; deliver via `SLACK_WEBHOOK_URL`
+   if set, else post `data/pending_slack.json` through the Slack connector.
+5. Create the client email as a **Gmail draft**. Mike sends it.
 
-## 5. Report
+## Secrets
 
-End with a short summary: listings collected/failed, top-3 priority movers vs
-the previous snapshot if visible, admin item count, dashboard URL, and the
-path to the day's draft. Flag anything anomalous (roster jumps, mass nulls,
-deploy failure) rather than working around it silently.
+`WHEELHOUSE_API_KEY` — env var, or a gitignored key file (see `wh_api.load_key`).
+Never commit it, never log it, never put it in an error message. A file named
+`*.gitignore` is NOT ignored by git — `.gitignore` has explicit patterns for it.
+
+## Known data state (2026-09-15)
+
+- Fee corruption in `2026-arrivals`: 2,748 rows created ≥ 2026-06-11 (and
+  outliers earlier) — unfixed; Mike's re-export produced a byte-identical file.
+  Root cause is upstream (Brightside), not the export.
+- `2025-arrivals`: Jan–Feb absent, Mar–Sep at ~21% of 2026 volume. Oct–Dec complete.
+- `2026-arrivals` ends at 2026-09-30 check-ins. **Wheelhouse has all of the above
+  and more** (2024 → 2027), which is why it became the source of record.
+- `market-data180` is a byte copy of `market-data90` (no 180-day data exists).
+  The 12 per-bedroom tabs are real and distinct.
+- `nightly_subtotal` == sheet `Rent Revenue` on ~86% of joined rows; the ~9%
+  mismatches are consistently higher in Wheelhouse — unexplained, likely
+  post-booking modifications. Ask Mike what the export's Rent Revenue nets out.
