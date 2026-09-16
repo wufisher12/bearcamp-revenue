@@ -112,12 +112,14 @@ def build_doc(run):
     by_unit = R.aggregate([r for r in live if r["check_in"].year == year],
                           key=lambda r: r["listing_id"])
     top = sorted(by_unit.items(), key=lambda kv: -kv[1]["rent_revenue"])[:5]
-    unit_rows = [[
+    # Firestore cannot store arrays nested directly in arrays, so each table
+    # row is a map: {"cells": [...]} (contract v2, amended 2026-09-15).
+    unit_rows = [{"cells": [
         (listings.get(lid, {}).get("title") or lid)[:40],
         money(b["rent_revenue"]),
         str(b["nights"]),
         "$%s" % format(round(b["adr"]), ",") if b["adr"] else "-",
-    ] for lid, b in top]
+    ]} for lid, b in top]
 
     # --- Next-60 weekly OTB nights, this year vs same point last year
     def weekly_nights(base_as_of, base_start):
