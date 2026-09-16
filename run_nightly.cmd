@@ -3,7 +3,7 @@ rem Bear Camp nightly collection - invoked by Windows Task Scheduler.
 rem Headless: no Claude session, no MCP. Runs against the last sanitized
 rem workbook (data\master_safe.xlsx); the Monday assembly refreshes that.
 setlocal
-cd /d "C:\Users\mfish\Desktop\claude\projects\bear-camp\bearcamp-revenue"
+cd /d "C:\Users\mfish\Desktop\claude\projects\company-hub\bear-camp\bearcamp-revenue"
 if not exist "data\logs" mkdir "data\logs"
 set PYTHONIOENCODING=utf-8
 echo.>> "data\logs\nightly.log"
