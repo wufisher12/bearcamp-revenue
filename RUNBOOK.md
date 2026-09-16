@@ -44,6 +44,26 @@ each). Output ~2–3 MB gzipped per night. Log: `data/logs/nightly.log`.
 
 Manual run / subset: `python collect_nightly.py [--only kpis,reservations] [--limit N]`.
 
+## Hub dashboard publish (runs after the nightly collect)
+
+`publish_hub.py` builds the Bear Camp client dashboard document
+(client-dashboard-contract-v2 in the fisherfamilyhub repo) from the latest
+good snapshot and writes it to Firestore `hub/mfg-client-bearcamp` in project
+`fisher-family-hub`. The hub portal renders it live. Chained in
+`run_nightly.cmd` after the collector; also runnable manually any time.
+
+- **Credentials:** a Firebase service-account JSON at `data/firebase-sa.json`
+  (or point `FIREBASE_SERVICE_ACCOUNT` at another path). Generate: Firebase
+  console → fisher-family-hub → Project settings → Service accounts →
+  Generate new private key. `data/` is gitignored; never commit or log it.
+  Without the key the step logs "skipped" and exits 0.
+- **Dry run:** `python publish_hub.py --dry-run` — writes
+  `data/hub_dashboard.json` only. The full document is saved there on real
+  runs too, as the audit copy of what was published.
+- Writes ONLY that one document, whole-document each run, idempotent per
+  snapshot date. Rent basis / arrival attribution / OTB labeling rules apply
+  (enforced upstream; labels baked into the document text).
+
 ## Monday assembly (to be built — PRODUCT-V2 §1)
 
 Runs as a Claude scheduled task because it needs the Drive connector:
