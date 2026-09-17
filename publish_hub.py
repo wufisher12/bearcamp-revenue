@@ -32,6 +32,7 @@ import os
 import sys
 import time
 
+import market_tabs
 import reservations as R
 import store
 
@@ -73,6 +74,163 @@ def dir_of(pct, flat_band=0.5):
 
 def ly_date(d):
     return dt.date(d.year - 1, d.month, min(d.day, 28))
+
+
+# ------------------------------------------------------------- benchmarking
+def _mt_block(tab, entity, role):
+    for b in tab.get("blocks", []):
+        if b["entity"] == entity and b.get("role") == role:
+            return b
+    return None
+
+
+def _load_market(run):
+    """Market blocks for a run: prefer the snapshot's saved copy, fall back
+    to parsing the current sanitized workbook (pre-2026-09-17 snapshots)."""
+    try:
+        return run.read_json("market_tabs")
+    except FileNotFoundError:
+        path = os.path.join("data", "master_safe.xlsx")
+        return market_tabs.parse_workbook(path) if os.path.exists(path) else None
+
+
+def _pickup_baseline(as_of, days=7):
+    """The newest good run at least `days-1` days older than as_of that has
+    saved market data - the comparison point for pickup. None while the
+    per-pull history is still building."""
+    cutoff = (as_of - dt.timedelta(days=days - 1)).isoformat()
+    for e in sorted(store.read_index(), key=lambda e: e["date"], reverse=True):
+        if e.get("status") != store.STATUS_OK or e["date"] > cutoff:
+            continue
+        try:
+            return e["date"], store.Run(e["date"]).read_json("market_tabs")
+        except FileNotFoundError:
+            continue
+    return None, None
+
+
+def _agg(tab, entity, role):
+    b = _mt_block(tab, entity, role)
+    return b["period_aggregate"] if b else None
+
+
+def build_benchmarking(run):
+    """Portfolio vs market APO (Key Data), overall and per bedroom size.
+    Returns a tab dict, or None when no market data is available."""
+    mt = _load_market(run)
+    if not mt or "market-data90" not in mt:
+        return None
+    main = mt["market-data90"]
+    p_now, m_now = _agg(main, "PORTFOLIO", "today"), _agg(main, "MARKET", "today")
+    p_ly, m_ly = _agg(main, "PORTFOLIO", "last_year"), _agg(main, "MARKET", "last_year")
+    if p_now is None or m_now is None:
+        return None
+    hdr = _mt_block(main, "PORTFOLIO", "today")
+    as_of = hdr["as_of"]
+
+    base_date, base_mt = _pickup_baseline(dt.date.fromisoformat(run.date))
+    pickup_note = ""
+
+    def pickup(tab_name):
+        """Portfolio and market APO change since the baseline pull, in pts."""
+        if not base_mt or tab_name not in base_mt:
+            return None, None
+        cur, old = mt.get(tab_name), base_mt[tab_name]
+        pp, mm = _agg(cur, "PORTFOLIO", "today"), _agg(cur, "MARKET", "today")
+        po, mo = _agg(old, "PORTFOLIO", "today"), _agg(old, "MARKET", "today")
+        if None in (pp, mm, po, mo):
+            return None, None
+        return pp - po, mm - mo
+
+    pk_p, pk_m = pickup("market-data90")
+
+    tiles = [
+        {"label": "Portfolio APO · Next 90",
+         "value": "%.1f%%" % p_now,
+         "delta": "%+.1f pts vs market" % (p_now - m_now),
+         "dir": dir_of(p_now - m_now),
+         "hint": "market %.1f%% (Pigeon Forge + 4 more)" % m_now},
+    ]
+    if p_ly is not None:
+        tiles.append({
+            "label": "Portfolio APO vs Last Year",
+            "value": "%.1f%%" % p_now,
+            "delta": "%+.1f pts vs LY" % (p_now - p_ly),
+            "dir": dir_of(p_now - p_ly),
+            "hint": "LY %.1f%% · market moved %+.1f pts"
+                    % (p_ly, (m_now - m_ly) if m_ly is not None else 0)})
+    if pk_p is not None:
+        tiles.append({
+            "label": "APO Pickup since %s" % base_date,
+            "value": "%+.1f pts" % pk_p,
+            "delta": "%+.1f pts vs market" % (pk_p - pk_m),
+            "dir": dir_of(pk_p - pk_m),
+            "hint": "market picked up %+.1f pts" % pk_m})
+    else:
+        pickup_note = (" Pickup vs market appears once a week of saved "
+                       "nightly sheet pulls accumulates.")
+
+    def as_pct(v):
+        # Point values arrive as 0-1 fractions; block aggregates as 0-100.
+        return round(v * 100, 1) if v is not None else None
+
+    p_pts = _mt_block(main, "PORTFOLIO", "today")["points"]
+    m_blk = _mt_block(main, "MARKET", "today")
+    m_by_date = {p["date"]: p["value"] for p in (m_blk["points"] if m_blk else [])}
+    p_ly_blk = _mt_block(main, "PORTFOLIO", "last_year")
+    ly_vals = [as_pct(p["value"]) for p in (p_ly_blk["points"] if p_ly_blk else [])]
+    xl, sp, sm = [], [], []
+    for pt in p_pts:
+        d = dt.date.fromisoformat(pt["date"])
+        xl.append(d.strftime("%b %d").replace(" 0", " "))
+        sp.append(as_pct(pt["value"]))
+        sm.append(as_pct(m_by_date.get(pt["date"])))
+    series = [{"name": "Portfolio", "values": sp},
+              {"name": "Market", "values": sm}]
+    if len(ly_vals) == len(xl):
+        series.append({"name": "Portfolio LY", "values": ly_vals})
+
+    # Per-bedroom table from the <N>br-market-data90 tabs.
+    rows = []
+    for name in sorted((n for n in mt if n.endswith("br-market-data90")),
+                       key=lambda n: int(n.split("br-")[0])):
+        br = name.split("br-")[0]
+        t = mt[name]
+        p, m = _agg(t, "PORTFOLIO", "today"), _agg(t, "MARKET", "today")
+        ply = _agg(t, "PORTFOLIO", "last_year")
+        if p is None or m is None:
+            continue
+        bp, bm = pickup(name)
+        rows.append({"cells": [
+            "%s BR" % br,
+            "%.1f%%" % p,
+            "%.1f%%" % m,
+            "%+.1f" % (p - m),
+            "%+.1f" % (p - ply) if ply is not None else "-",
+            "%+.1f" % (bp - bm) if bp is not None else "-",
+        ]})
+
+    return {
+        "id": "benchmarking",
+        "label": "Benchmarking",
+        "sections": [
+            {"type": "tiles", "title": "Portfolio vs market", "items": tiles},
+            {"type": "chart",
+             "title": "Next 90 days - adjusted paid occupancy by week",
+             "kind": "line", "xLabels": xl, "series": series,
+             "format": "percent"},
+            {"type": "table",
+             "title": "By bedroom size - next 90 days",
+             "columns": ["Size", "Portfolio APO", "Market APO",
+                         "vs Mkt (pts)", "vs LY (pts)", "Pickup vs Mkt"],
+             "rows": rows},
+            {"type": "note",
+             "text": "Key Data Adjusted Paid Occupancy as of %s; market is "
+                     "Direct (Pigeon Forge + 4 more). Sheet data is saved on "
+                     "every nightly pull for reconciliation.%s"
+                     % (as_of, pickup_note)},
+        ],
+    }
 
 
 # ------------------------------------------------------------------ build
@@ -220,6 +378,9 @@ def build_doc(run):
             },
         ],
     }
+    bench = build_benchmarking(run)
+    if bench:
+        doc["tabs"].append(bench)
     return doc
 
 

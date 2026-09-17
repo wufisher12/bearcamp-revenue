@@ -81,12 +81,14 @@ def strip_fees(d):
 
 
 def prepare_sheet():
-    """Sanitize the downloaded workbook before anything reads it.
+    """Fetch and sanitize the workbook before anything reads it.
 
-    Headless nightly runs have no Drive access, so they run against the last
-    sanitized copy. units-defined changes slowly (onboarding is occasional);
-    the Monday assembly refreshes it.
+    Every pull first tries a fresh headless download via the Drive API
+    (sheet_fetch, using the hub service account); on any failure it runs
+    against the last sanitized copy, so a Drive outage never kills the night.
     """
+    import sheet_fetch
+    sheet_fetch.fetch(RAW_XLSX)
     if os.path.exists(RAW_XLSX):
         rep = sheet_access.sanitize(RAW_XLSX, SAFE_XLSX, remove_src=True)
         dropped = ", ".join(rep["dropped"]) or "none"
@@ -231,6 +233,25 @@ def main():
 
     run.write_json("listings", targets)
     run.counts["listings"] = len(targets)
+
+    # Per-pull sheet record (Mike, 2026-09-17): every pull saves what the
+    # sheet said that night - all units-defined rows and the parsed market
+    # blocks - so market data and active units can be reconciled against the
+    # exact sheet state of any past pull. Pickup-vs-market is derived from
+    # consecutive saved pulls (the sheet no longer carries 7-days-ago blocks).
+    try:
+        all_units, _ = sheet_access.read_units_defined(SAFE_XLSX, active_only=False)
+        run.write_json("units", all_units)
+        run.counts["units"] = len(all_units)
+    except Exception as exc:
+        run.fail("-", "units-save", exc)
+    try:
+        import market_tabs
+        mt = market_tabs.parse_workbook(SAFE_XLSX)
+        run.write_json("market_tabs", mt)
+        run.counts["market_tabs"] = len(mt)
+    except Exception as exc:
+        run.fail("-", "market_tabs", exc)
 
     if "kpis" in stages:
         kpis, total = {}, len(targets)
