@@ -94,19 +94,45 @@ def _load_market(run):
         return market_tabs.parse_workbook(path) if os.path.exists(path) else None
 
 
+MARKET_HISTORY_DIR = os.path.join("data", "market_history")
+
+
+def _baseline_candidates():
+    """Every saved market dataset, as (date, loader) pairs, newest first.
+    Sources: nightly snapshots (market_tabs.json.gz) and one-off seeds in
+    data/market_history/<date>.json (e.g. exported from the sheet's Drive
+    revision history by seed_market_history.py)."""
+    out = {}
+    if os.path.isdir(MARKET_HISTORY_DIR):
+        for fn in os.listdir(MARKET_HISTORY_DIR):
+            if fn.endswith(".json"):
+                p = os.path.join(MARKET_HISTORY_DIR, fn)
+                out[fn[:-5]] = lambda p=p: json.load(io.open(p, encoding="utf-8"))
+    for e in store.read_index():
+        if e.get("status") == store.STATUS_OK:
+            r = store.Run(e["date"])
+            out[e["date"]] = lambda r=r: r.read_json("market_tabs")
+    return sorted(out.items(), key=lambda kv: kv[0], reverse=True)
+
+
 def _pickup_baseline(as_of, days=7):
-    """The newest good run at least `days-1` days older than as_of that has
-    saved market data - the comparison point for pickup. None while the
-    per-pull history is still building."""
+    """The newest saved market dataset at least `days-1` days older than
+    as_of; if none that old exists yet, the OLDEST available one (the pickup
+    tile labels the true window, so a shorter one is honest, just younger).
+    None only when there is no history at all."""
     cutoff = (as_of - dt.timedelta(days=days - 1)).isoformat()
-    for e in sorted(store.read_index(), key=lambda e: e["date"], reverse=True):
-        if e.get("status") != store.STATUS_OK or e["date"] > cutoff:
+    fallback = None
+    for date, load in _baseline_candidates():
+        if date >= as_of.isoformat():
             continue
         try:
-            return e["date"], store.Run(e["date"]).read_json("market_tabs")
+            mt = load()
         except FileNotFoundError:
             continue
-    return None, None
+        if date <= cutoff:
+            return date, mt
+        fallback = (date, mt)  # newest-first iteration: last kept = oldest
+    return fallback if fallback else (None, None)
 
 
 def _agg(tab, entity, role):
@@ -129,6 +155,12 @@ def build_benchmarking(run):
     as_of = hdr["as_of"]
 
     base_date, base_mt = _pickup_baseline(dt.date.fromisoformat(run.date))
+    # Label pickup by the baseline sheet's own as-of (from its block header),
+    # which can trail the pull date by a day.
+    if base_mt and "market-data90" in base_mt:
+        b = _mt_block(base_mt["market-data90"], "PORTFOLIO", "today")
+        if b and b.get("as_of"):
+            base_date = b["as_of"]
     pickup_note = ""
 
     def pickup(tab_name):
