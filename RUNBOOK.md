@@ -26,9 +26,14 @@ at 03:00 daily. Wakes the machine, runs on battery, retries twice, and runs at
 next opportunity if the window is missed. No Claude session, no MCP.
 
 It runs `collect_nightly.py`, which:
-1. Sanitizes `data/master.xlsx` → `data/master_safe.xlsx` if a fresh download is
-   present (drops every non-allowlisted tab, deletes the raw file). Otherwise runs
-   against the last sanitized copy — the roster changes slowly and Monday refreshes it.
+1. Tries a fresh headless download of the master sheet (`sheet_fetch.py` — Drive
+   export using the hub service account at `data/firebase-sa.json`; requires the
+   sheet shared Viewer with that account and the Drive API enabled on
+   fisher-family-hub). Sanitizes → `data/master_safe.xlsx`; on any fetch failure
+   runs against the last sanitized copy. Each run saves that night's parsed
+   market blocks (`market_tabs.json.gz`) and all `units-defined` rows
+   (`units.json.gz`) into the snapshot for reconciliation; APO pickup vs market
+   on the hub's Benchmarking tab is derived from these saved pulls.
 2. Reads Active rows from `units-defined`, pulls `/listings`, joins on WH ID.
 3. Pulls per listing: KPIs, price calendar, min/max prices, min-stay calendar,
    custom rates, and **all reservation pages**.
