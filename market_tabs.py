@@ -193,13 +193,30 @@ def order_matches_documented(blocks: list[dict]) -> bool:
     return actual == DOCUMENTED_ORDER
 
 
+def _days_apart(a: str, b: str) -> int:
+    """Absolute day distance between two ISO date strings; 9999 if unparseable."""
+    try:
+        da = _dt.date.fromisoformat(a)
+        db = _dt.date.fromisoformat(b)
+        return abs((db - da).days)
+    except (TypeError, ValueError):
+        return 9999
+
+
 def _role(block: dict, blocks: list[dict]) -> str:
-    """Classify a block as today / last_year / seven_days_ago among its entity peers."""
+    """Classify a block as today / last_year / seven_days_ago among its entity peers.
+
+    A last-year block starts its window ~a year earlier; a seven-days-ago
+    block may start a few days before today's window (its pull date), so
+    current-year membership is by distance (<=180 days), not exact match.
+    Within the current year, the newest as_of is today; older is 7-days-ago.
+    """
     peers = [b for b in blocks if b["entity"] == block["entity"]]
     latest_start = max(b["window_start"] for b in peers)
-    if block["window_start"] != latest_start:
+    if _days_apart(block["window_start"], latest_start) > 180:
         return "last_year"
-    current = [b for b in peers if b["window_start"] == latest_start]
+    current = [b for b in peers
+               if _days_apart(b["window_start"], latest_start) <= 180]
     newest_as_of = max(b["as_of"] for b in current)
     return "today" if block["as_of"] == newest_as_of else "seven_days_ago"
 

@@ -163,18 +163,45 @@ def build_benchmarking(run):
             base_date = b["as_of"]
     pickup_note = ""
 
+    def sheet_pickup(tab):
+        """Pickup from the tab's own seven_days_ago blocks (Mike, 2026-09-23:
+        each tab carries today-minus-7 data). None when absent or the gap
+        isn't plausibly a week (3-11 days)."""
+        p7, m7 = _mt_block(tab, "PORTFOLIO", "seven_days_ago"), _mt_block(tab, "MARKET", "seven_days_ago")
+        pt, mt_ = _mt_block(tab, "PORTFOLIO", "today"), _mt_block(tab, "MARKET", "today")
+        if not (p7 and m7 and pt and mt_):
+            return None
+        vals = (pt["period_aggregate"], p7["period_aggregate"],
+                mt_["period_aggregate"], m7["period_aggregate"])
+        if None in vals:
+            return None
+        gap = market_tabs._days_apart(p7["as_of"], pt["as_of"])
+        if not 3 <= gap <= 11:
+            return None
+        return vals[0] - vals[1], vals[2] - vals[3], p7["as_of"]
+
     def pickup(tab_name):
-        """Portfolio and market APO change since the baseline pull, in pts."""
+        """Portfolio and market APO change over ~a week, in pts. Prefers the
+        sheet's own 7-days-ago blocks; falls back to our saved pulls."""
+        cur = mt.get(tab_name)
+        if cur:
+            native = sheet_pickup(cur)
+            if native:
+                return native[0], native[1]
         if not base_mt or tab_name not in base_mt:
             return None, None
-        cur, old = mt.get(tab_name), base_mt[tab_name]
+        old = base_mt[tab_name]
         pp, mm = _agg(cur, "PORTFOLIO", "today"), _agg(cur, "MARKET", "today")
         po, mo = _agg(old, "PORTFOLIO", "today"), _agg(old, "MARKET", "today")
         if None in (pp, mm, po, mo):
             return None, None
         return pp - po, mm - mo
 
-    pk_p, pk_m = pickup("market-data90")
+    native_main = sheet_pickup(main)
+    if native_main:
+        pk_p, pk_m, base_date = native_main
+    else:
+        pk_p, pk_m = pickup("market-data90")
 
     tiles = [
         {"label": "Portfolio APO · Next 90",
