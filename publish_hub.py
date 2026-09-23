@@ -238,7 +238,8 @@ def build_benchmarking(run):
             "%+.1f" % (bp - bm) if bp is not None else "-",
         ]})
 
-    sections = [{"type": "tiles", "title": "Portfolio vs market", "items": tiles}]
+    sections = [{"type": "tiles", "title": "Bear Camp vs. Market",
+                 "titleStyle": "heading", "items": tiles}]
     bench_chart = hub_sections.benchmark(mt, _mt_block)
     if bench_chart:
         sections.append(bench_chart)
