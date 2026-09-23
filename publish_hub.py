@@ -32,6 +32,7 @@ import os
 import sys
 import time
 
+import hub_sections
 import market_tabs
 import reservations as R
 import store
@@ -39,29 +40,20 @@ import store
 CLIENT_ID = "bearcamp"
 LABEL = "Bear Camp Cabin Rentals"
 DOC_PATH = "hub/mfg-client-" + CLIENT_ID
+NOTES_DOC = "mfg-client-%s-notes" % CLIENT_ID
 SA_PATH = os.environ.get("FIREBASE_SERVICE_ACCOUNT",
                          os.path.join("data", "firebase-sa.json"))
 OUT_JSON = os.path.join("data", "hub_dashboard.json")
-MAX_DOC_BYTES = 200_000
-SECTION_TYPES = {"tiles", "chart", "table", "note"}
+MAX_DOC_BYTES = 500_000  # Firestore hard limit is 1 MB
+SECTION_TYPES = {"tiles", "chart", "table", "note",
+                 "listingTable", "kpiExplorer", "benchmark", "compset"}
 
 
 # ------------------------------------------------------------------ format
-def money(v):
-    v = float(v)
-    if abs(v) >= 1e6:
-        return "$%.2fM" % (v / 1e6)
-    if abs(v) >= 1e3:
-        return "$%dK" % round(v / 1e3)
-    return "$%d" % round(v)
 
 
-def money_exact(v):
-    return "$%s" % format(int(round(v)), ",")
 
 
-def delta_pct(pct):
-    return "%+.1f%%" % pct
 
 
 def dir_of(pct, flat_band=0.5):
@@ -71,9 +63,6 @@ def dir_of(pct, flat_band=0.5):
         return "flat"
     return "up" if pct > 0 else "down"
 
-
-def ly_date(d):
-    return dt.date(d.year - 1, d.month, min(d.day, 28))
 
 
 # ------------------------------------------------------------- benchmarking
@@ -229,26 +218,6 @@ def build_benchmarking(run):
         pickup_note = (" Pickup vs market appears once a week of saved "
                        "nightly sheet pulls accumulates.")
 
-    def as_pct(v):
-        # Point values arrive as 0-1 fractions; block aggregates as 0-100.
-        return round(v * 100, 1) if v is not None else None
-
-    p_pts = _mt_block(main, "PORTFOLIO", "today")["points"]
-    m_blk = _mt_block(main, "MARKET", "today")
-    m_by_date = {p["date"]: p["value"] for p in (m_blk["points"] if m_blk else [])}
-    p_ly_blk = _mt_block(main, "PORTFOLIO", "last_year")
-    ly_vals = [as_pct(p["value"]) for p in (p_ly_blk["points"] if p_ly_blk else [])]
-    xl, sp, sm = [], [], []
-    for pt in p_pts:
-        d = dt.date.fromisoformat(pt["date"])
-        xl.append(d.strftime("%b %d").replace(" 0", " "))
-        sp.append(as_pct(pt["value"]))
-        sm.append(as_pct(m_by_date.get(pt["date"])))
-    series = [{"name": "Portfolio", "values": sp},
-              {"name": "Market", "values": sm}]
-    if len(ly_vals) == len(xl):
-        series.append({"name": "Portfolio LY", "values": ly_vals})
-
     # Per-bedroom table from the <N>br-market-data90 tabs.
     rows = []
     for name in sorted((n for n in mt if n.endswith("br-market-data90")),
@@ -269,15 +238,14 @@ def build_benchmarking(run):
             "%+.1f" % (bp - bm) if bp is not None else "-",
         ]})
 
+    sections = [{"type": "tiles", "title": "Portfolio vs market", "items": tiles}]
+    bench_chart = hub_sections.benchmark(mt, _mt_block)
+    if bench_chart:
+        sections.append(bench_chart)
     return {
         "id": "benchmarking",
         "label": "Benchmarking",
-        "sections": [
-            {"type": "tiles", "title": "Portfolio vs market", "items": tiles},
-            {"type": "chart",
-             "title": "Next 90 days - adjusted paid occupancy by week",
-             "kind": "line", "xLabels": xl, "series": series,
-             "format": "percent"},
+        "sections": sections + [
             {"type": "table",
              "title": "By bedroom size - next 90 days",
              "columns": ["Size", "Portfolio APO", "Market APO",
@@ -294,153 +262,40 @@ def build_benchmarking(run):
 
 # ------------------------------------------------------------------ build
 def build_doc(run):
+    """Five tabs (Mike, 2026-09-23): Active Listings (interactive table with
+    notes), Overview (filterable KPI explorer, Jan-Dec monthly), Pacing (same,
+    next 120 days weekly), Benchmarking (tiles + six-series toggleable chart +
+    per-BR table), Comp Sets (draft shell for Bear Necessities)."""
     as_of = dt.date.fromisoformat(run.date)
-    year = as_of.year
     rows = R.load(run)
-    live = R.active(rows)
-    listings = {l["listing_id"]: l for l in run.read_json("listings")}
+    listings = run.read_json("listings")
+    try:
+        units = [u for u in run.read_json("units")
+                 if str(u.get("Status", "")).strip().lower() == "active"]
+    except FileNotFoundError:
+        units = []
+    try:
+        kpis = run.read_json("kpis")
+    except FileNotFoundError:
+        kpis = {}
 
-    # --- Overview: YTD realized (check-in on or before as_of), YoY same window
-    ytd_cur = R.aggregate([r for r in live
-                           if dt.date(year, 1, 1) <= r["check_in"] <= as_of])["all"]
-    ytd_ly = R.aggregate([r for r in live
-                          if dt.date(year - 1, 1, 1) <= r["check_in"] <= ly_date(as_of)])["all"]
-    rev_d = ((ytd_cur["rent_revenue"] - ytd_ly["rent_revenue"])
-             / ytd_ly["rent_revenue"] * 100) if ytd_ly["rent_revenue"] else None
-    adr_d = ((ytd_cur["adr"] - ytd_ly["adr"]) / ytd_ly["adr"] * 100
-             ) if (ytd_cur["adr"] and ytd_ly["adr"]) else None
-    nts_d = ((ytd_cur["nights"] - ytd_ly["nights"]) / ytd_ly["nights"] * 100
-             ) if ytd_ly["nights"] else None
-
-    # --- Pacing: next 30/60 OTB vs same point last year
-    def pace(days):
-        start, end = as_of + dt.timedelta(days=1), as_of + dt.timedelta(days=days)
-        return R.pace_yoy(rows, as_of, start, end)["all"]
-
-    p30, p60 = pace(30), pace(60)
-
-    # --- Monthly rent revenue chart, current year vs last year
-    def monthly(y):
-        agg = R.aggregate([r for r in live if r["check_in"].year == y],
-                          key=lambda r: r["check_in"].month)
-        return [round(agg.get(m, {"rent_revenue": 0})["rent_revenue"]) for m in range(1, 13)]
-
-    # --- Top units by current-year rent revenue
-    by_unit = R.aggregate([r for r in live if r["check_in"].year == year],
-                          key=lambda r: r["listing_id"])
-    top = sorted(by_unit.items(), key=lambda kv: -kv[1]["rent_revenue"])[:5]
-    # Firestore cannot store arrays nested directly in arrays, so each table
-    # row is a map: {"cells": [...]} (contract v2, amended 2026-09-15).
-    unit_rows = [{"cells": [
-        (listings.get(lid, {}).get("title") or lid)[:40],
-        money(b["rent_revenue"]),
-        str(b["nights"]),
-        "$%s" % format(round(b["adr"]), ",") if b["adr"] else "-",
-    ]} for lid, b in top]
-
-    # --- Next-60 weekly OTB nights, this year vs same point last year
-    def weekly_nights(base_as_of, base_start):
-        out = []
-        for w in range(8):
-            s = base_start + dt.timedelta(days=7 * w)
-            e = s + dt.timedelta(days=6)
-            out.append(R.otb(rows, base_as_of, s, e)["all"]["nights"])
-        return out
-
-    wk_start = as_of + dt.timedelta(days=1)
-    wk_cur = weekly_nights(as_of, wk_start)
-    wk_ly = weekly_nights(ly_date(as_of), ly_date(wk_start))
-    wk_labels = [(wk_start + dt.timedelta(days=7 * w)).strftime("%b %d").replace(" 0", " ")
-                 for w in range(8)]
-
-    def pace_tile(label, p, days):
-        c, pr = p["current"], p["prior"]
-        d = p["rent_revenue_delta_pct"]
-        return {
-            "label": label,
-            "value": money(c["rent_revenue"]) if c else "-",
-            "delta": (delta_pct(d) + " vs LY") if d is not None else "LY not comparable",
-            "dir": dir_of(d),
-            "hint": "%s nights on the books" % format(c["nights"], ",") if c else "",
-        }
-
-    doc = {
-        "clientId": CLIENT_ID,
-        "label": LABEL,
-        "updated": int(time.time() * 1000),
-        "asOf": run.date,
-        "tabs": [
-            {
-                "id": "overview",
-                "label": "Overview",
-                "sections": [
-                    {"type": "tiles", "title": "Headline", "items": [
-                        {"label": "%d Rent Revenue YTD" % year,
-                         "value": money(ytd_cur["rent_revenue"]),
-                         "delta": delta_pct(rev_d) + " vs LY" if rev_d is not None else "",
-                         "dir": dir_of(rev_d),
-                         "hint": "arrivals through %s" % run.date},
-                        {"label": "Rent ADR YTD",
-                         "value": "$%d" % round(ytd_cur["adr"] or 0),
-                         "delta": delta_pct(adr_d) + " vs LY" if adr_d is not None else "",
-                         "dir": dir_of(adr_d)},
-                        {"label": "Nights YTD",
-                         "value": format(ytd_cur["nights"], ","),
-                         "delta": delta_pct(nts_d) + " vs LY" if nts_d is not None else "",
-                         "dir": dir_of(nts_d)},
-                        pace_tile("Next 60 Days OTB", p60, 60),
-                    ]},
-                    {"type": "chart",
-                     "title": "Rent revenue by arrival month - %d vs %d (booked to date)" % (year, year - 1),
-                     "kind": "bar",
-                     "xLabels": ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
-                     "series": [
-                         {"name": str(year), "values": monthly(year)},
-                         {"name": str(year - 1), "values": monthly(year - 1)},
-                     ],
-                     "format": "currency"},
-                    {"type": "table",
-                     "title": "Top units by %d rent revenue" % year,
-                     "columns": ["Unit", "Rent Revenue", "Nights", "ADR"],
-                     "rows": unit_rows},
-                    {"type": "note",
-                     "text": "Rent revenue only (fees excluded), arrival-date "
-                             "attribution, canceled stays removed. Future months "
-                             "show what is booked so far. Source: Wheelhouse "
-                             "nightly snapshot %s, %d active units."
-                             % (run.date, len(listings))},
-                ],
-            },
-            {
-                "id": "pacing",
-                "label": "Pacing",
-                "sections": [
-                    {"type": "tiles", "title": "On the books", "items": [
-                        pace_tile("Next 30 Days OTB", p30, 30),
-                        pace_tile("Next 60 Days OTB", p60, 60),
-                    ]},
-                    {"type": "chart",
-                     "title": "Next 60 days - nights on the books by week",
-                     "kind": "line",
-                     "xLabels": wk_labels,
-                     "series": [
-                         {"name": "This year", "values": wk_cur},
-                         {"name": "Same point LY", "values": wk_ly},
-                     ],
-                     "format": "number"},
-                    {"type": "note",
-                     "text": "On the books as of %s, compared with the same "
-                             "point last year (%s). Rent basis, arrival-date "
-                             "attribution." % (as_of, ly_date(as_of))},
-                ],
-            },
-        ],
-    }
+    tabs = [
+        {"id": "listings", "label": "Active Listings",
+         "sections": [hub_sections.listing_table(listings, units, NOTES_DOC)]},
+        {"id": "overview", "label": "Overview",
+         "sections": [hub_sections.kpi_explorer(rows, listings, as_of, "month")]},
+        {"id": "pacing", "label": "Pacing",
+         "sections": [hub_sections.kpi_explorer(rows, listings, as_of, "week")]},
+    ]
     bench = build_benchmarking(run)
     if bench:
-        doc["tabs"].append(bench)
-    return doc
+        tabs.append(bench)
+    comp = hub_sections.compset_shell(listings, kpis)
+    tabs.append({"id": "compsets", "label": "Comp Sets",
+                 "sections": [comp] if comp else []})
+
+    return {"clientId": CLIENT_ID, "label": LABEL,
+            "updated": int(time.time() * 1000), "asOf": run.date, "tabs": tabs}
 
 
 def validate(doc):
