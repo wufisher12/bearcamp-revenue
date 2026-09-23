@@ -234,50 +234,82 @@ def benchmark(mt, mt_block):
 
 
 # ------------------------------------------------------------- comp sets
-def compset_shell(listings, kpis):
-    """Draft comp-set view for Bear Necessities. Wheelhouse has no comp set
-    on it yet (comp_set_count 0), so today's data is the listing vs its
-    NEIGHBORHOOD occupancy; the comps list ships as labeled empty slots."""
-    bn = next((l for l in listings
-               if "bear necessities" in (l.get("sheet_name") or "").lower()), None)
-    if not bn:
+def _median(vals):
+    vals = sorted(v for v in vals if v is not None)
+    if not vals:
         return None
-    k = kpis.get(bn["listing_id"], {})
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2
 
-    def kv(field, window):
-        v = (k.get(field) or {}).get(window)
-        return v
 
-    def pct(v):
-        return "%.1f%%" % (v * 100) if v is not None else "-"
+def compsets_list(sets_data, listings):
+    """Every Wheelhouse comp set: a summary block (name + high-level KPIs)
+    that the hub expands into the member comps with OTA links and
+    trailing-year metrics. Fully API-driven - nothing entered by hand."""
+    own_by_id = {l["listing_id"]: l for l in listings}
+    out_sets = []
+    for s in sets_data or []:
+        members = (s.get("members") or {}).get("active") or []
+        occs = [m.get("occupancy_adjusted_365_0") for m in members]
+        adrs = [m.get("adr_365_0") for m in members]
+        med_occ, med_adr = _median(occs), _median(adrs)
 
-    def money(v):
-        return "$%s" % format(round(v), ",") if v is not None else "-"
+        crit = []
+        f = s.get("filters") or {}
+        if f.get("room_type", {}).get("one_of"):
+            crit.append("/".join(map(str, f["room_type"]["one_of"])))
+        if f.get("bedrooms", {}).get("one_of"):
+            crit.append("%s BR" % ", ".join(map(str, sorted(f["bedrooms"]["one_of"]))))
+        criteria = " · ".join(crit) if crit else "hand-picked comps"
 
-    rows = []
-    for win, label in (("0_7", "Next 7 days"), ("0_30", "Next 30 days"),
-                       ("0_60", "Next 60 days"), ("0_90", "Next 90 days")):
-        rows.append({"cells": [
-            label,
-            pct(kv("occupancy_adjusted", win)),
-            pct(kv("occupancy_neighborhood_adjusted", win)),
-            money(kv("asking_rate", win)),
-        ]})
-    return {
-        "type": "compset",
-        "name": bn.get("sheet_name") or bn.get("title"),
-        "whUrl": WH_LISTING_URL % bn["wh_id"] if bn.get("wh_id") else None,
-        "criteria": "%s BR · %s · %s. Comps: similar size, private pool, "
-                    "Sevierville/Pigeon Forge corridor - selected in Wheelhouse."
-                    % (bn.get("bedrooms"), (bn.get("pool") or "no pool"), bn.get("city")),
-        "links": [{"label": "Comp slot %d - paste OTA link" % i, "url": None}
-                  for i in range(1, 6)],
-        "stats": {
-            "columns": ["Window", "Listing APO", "Neighborhood APO", "Avg asking rate"],
+        assoc = []
+        for a in s.get("associated") or []:
+            own = own_by_id.get(a.get("id"))
+            assoc.append({
+                "name": (own or {}).get("sheet_name") or a.get("title"),
+                "whUrl": WH_LISTING_URL % a["wheelhouse_id"] if a.get("wheelhouse_id") else None,
+            })
+
+        rows = []
+        for m in sorted(members, key=lambda m: -(m.get("revenue_365_0") or 0)):
+            def pct(v):
+                return "%.1f%%" % (v * 100) if v is not None else "-"
+            rows.append({"cells": [
+                {"text": (m.get("title") or "?")[:60], "url": m.get("url")},
+                str(m.get("bedrooms") or "-"),
+                str(m.get("sleeps") or "-"),
+                ("%.1f (%d)" % (m["star_rating"], m.get("review_count") or 0))
+                if m.get("star_rating") is not None else "-",
+                pct(m.get("occupancy_adjusted_365_0")),
+                "$%s" % format(round(m["adr_365_0"]), ",") if m.get("adr_365_0") is not None else "-",
+                "$%s" % format(round(m["revpar_365_0"]), ",") if m.get("revpar_365_0") is not None else "-",
+                pct(m.get("nights_percent_open_90_0")),
+            ]})
+
+        out_sets.append({
+            "id": s["id"],
+            "name": s.get("name"),
+            "kind": s.get("kind"),
+            "paid": bool(s.get("is_paid")),
+            "updated": str(s.get("updated_at") or "")[:10],
+            "criteria": criteria,
+            "counts": s.get("listing_counts") or {},
+            "kpis": {
+                "comps": len(members),
+                "medOcc": "%.1f%%" % (med_occ * 100) if med_occ is not None else "-",
+                "medAdr": "$%s" % format(round(med_adr), ",") if med_adr is not None else "-",
+            },
+            "associated": assoc,
+            "columns": ["Comp", "BR", "Sleeps", "Rating", "APO 365", "ADR 365",
+                        "RevPAR 365", "Open next 90"],
             "rows": rows,
-        },
-        "note": "Draft layout. No Wheelhouse comp set exists for this listing "
-                "yet (comp_set_count = 0), so market context is the Wheelhouse "
-                "neighborhood; once a comp set is created, its occupancy and "
-                "rate data replace the neighborhood columns.",
+        })
+    if not out_sets:
+        return None
+    return {
+        "type": "compsetList",
+        "sets": out_sets,
+        "note": "Pulled automatically from Wheelhouse each night - create or "
+                "edit comp sets there and they appear here. Comp metrics are "
+                "trailing-year; APO/ADR medians are across active comps.",
     }

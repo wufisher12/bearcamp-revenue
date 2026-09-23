@@ -46,7 +46,8 @@ SA_PATH = os.environ.get("FIREBASE_SERVICE_ACCOUNT",
 OUT_JSON = os.path.join("data", "hub_dashboard.json")
 MAX_DOC_BYTES = 500_000  # Firestore hard limit is 1 MB
 SECTION_TYPES = {"tiles", "chart", "table", "note",
-                 "listingTable", "kpiExplorer", "benchmark", "compset"}
+                 "listingTable", "kpiExplorer", "benchmark", "compset",
+                 "compsetList"}
 
 
 # ------------------------------------------------------------------ format
@@ -276,9 +277,9 @@ def build_doc(run):
     except FileNotFoundError:
         units = []
     try:
-        kpis = run.read_json("kpis")
+        sets_data = run.read_json("sets")
     except FileNotFoundError:
-        kpis = {}
+        sets_data = []
 
     tabs = [
         {"id": "listings", "label": "Active Listings",
@@ -291,7 +292,7 @@ def build_doc(run):
     bench = build_benchmarking(run)
     if bench:
         tabs.append(bench)
-    comp = hub_sections.compset_shell(listings, kpis)
+    comp = hub_sections.compsets_list(sets_data, listings)
     tabs.append({"id": "compsets", "label": "Comp Sets",
                  "sections": [comp] if comp else []})
 

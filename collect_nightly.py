@@ -67,7 +67,11 @@ PREF_FIELDS = ("min_price", "base_price", "max_price",
 
 CALENDAR_ENDPOINTS = ("price_calendar", "min_max_prices",
                       "min_stay_calendar", "custom_rates")
-ALL_STAGES = ("kpis",) + CALENDAR_ENDPOINTS + ("reservations",)
+ALL_STAGES = ("kpis",) + CALENDAR_ENDPOINTS + ("reservations", "sets")
+
+# Comp-set member fields worth keeping; `amenities` in particular is a large
+# blob with no dashboard use.
+SET_MEMBER_DROP = ("amenities",)
 
 RES_PAGE = 100
 RES_MAX_PAGES = 30          # 3,000 reservations per listing - generous ceiling
@@ -203,6 +207,37 @@ def collect_reservations(run, key, targets):
     print()
 
 
+def collect_sets(run, key):
+    """Comp sets (account-level, a handful of calls): every dynamic set plus
+    its member comps and associated own listings."""
+    try:
+        sets = wh_api.api_get("/sets", {}, key)
+    except RuntimeError as exc:
+        run.fail("-", "sets", exc)
+        return
+    out = []
+    for s in sets if isinstance(sets, list) else []:
+        rec = dict(s)
+        for name, endpoint in (("members", "listings"),
+                               ("associated", "associated_listings")):
+            try:
+                data = wh_api.api_get("/sets/%s/%s" % (s["id"], endpoint), {}, key)
+            except RuntimeError as exc:
+                run.fail(s["id"], "set-" + endpoint, exc)
+                data = None
+            rec[name] = data
+            time.sleep(wh_api.REQUEST_PAUSE)
+        if isinstance(rec.get("members"), dict):
+            for group in rec["members"].values():
+                for m in group if isinstance(group, list) else []:
+                    for f in SET_MEMBER_DROP:
+                        m.pop(f, None)
+        out.append(rec)
+    run.write_json("sets", out)
+    run.counts["sets"] = len(out)
+    print("  sets: %d comp sets" % len(out))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date")
@@ -277,6 +312,9 @@ def main():
 
     if "reservations" in stages:
         collect_reservations(run, key, targets)
+
+    if "sets" in stages:
+        collect_sets(run, key)
 
     meta = run.finalize(extra={"sheet": sheet_meta,
                                "scope": "units-defined Active only",
