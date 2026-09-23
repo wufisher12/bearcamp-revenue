@@ -283,7 +283,6 @@ def compsets_list(sets_data, listings, own_calendars=None, as_of=None):
                 {"text": (m.get("title") or "?")[:60], "url": m.get("url")},
                 str(m.get("bedrooms") or "-"),
                 str(m.get("sleeps") or "-"),
-                str(m.get("review_count") or "-"),
                 "$%s" % format(round(w["avg_price"]), ",") if w["avg_price"] is not None else "-",
                 "%.0f%%" % (w["occ"] * 100) if w["occ"] is not None else "-",
                 "%.1f%%" % (m["occupancy_adjusted_365_0"] * 100)
@@ -300,31 +299,57 @@ def compsets_list(sets_data, listings, own_calendars=None, as_of=None):
                 "whUrl": WH_LISTING_URL % a["wheelhouse_id"] if a.get("wheelhouse_id") else None,
             })
 
-        # Weekly posted-rate chart: pooled comp median vs own posted rate.
-        chart = None
-        if cal_by_id and as_of:
+        # Posted-rate charts: pooled comp median vs own posted rate, over
+        # arbitrary date buckets.
+        def rate_chart(buckets, title):
             xl, med_series = [], []
             own_series = {a["id"]: [] for a in assoc if a["id"] in own_calendars}
-            for wk in range(13):
-                ws = as_of + dt.timedelta(days=7 * wk)
-                we = ws + dt.timedelta(days=7)
-                xl.append(ws.strftime("%b %d").replace(" 0", " "))
+            for bs, be, label in buckets:
+                xl.append(label)
                 pooled = []
                 for nights in cal_by_id.values():
                     pooled += [n["price"] for n in nights or []
-                               if ws.isoformat() <= n.get("stay_date", "") < we.isoformat()
-                               and n.get("price")]
+                               if bs <= n.get("stay_date", "") < be and n.get("price")]
                 med_series.append(round(_median(pooled)) if pooled else None)
                 for aid in own_series:
-                    w = _cal_window(own_calendars[aid], ws.isoformat(), we.isoformat())
+                    w = _cal_window(own_calendars[aid], bs, be)
                     own_series[aid].append(round(w["avg_price"]) if w["avg_price"] is not None else None)
+            if all(v is None for v in med_series):
+                return None
             series = [{"name": "Comp median rate", "values": med_series}]
             for a in assoc:
                 if a["id"] in own_series:
                     series.append({"name": "%s (posted)" % a["name"],
                                    "values": own_series[a["id"]]})
-            chart = {"title": "Posted nightly rate by week - next 90 days",
-                     "xLabels": xl, "series": series, "format": "currency"}
+            return {"title": title, "xLabels": xl, "series": series,
+                    "format": "currency"}
+
+        chart, chart_monthly = None, None
+        if cal_by_id and as_of:
+            weekly = []
+            for wk in range(13):
+                ws = as_of + dt.timedelta(days=7 * wk)
+                weekly.append((ws.isoformat(), (ws + dt.timedelta(days=7)).isoformat(),
+                               ws.strftime("%b %d").replace(" 0", " ")))
+            chart = rate_chart(weekly, "Posted nightly rate by week - next 90 days")
+
+            # Monthly, for the six months after the 90-day window. The month
+            # the window ends in is only partially covered, so start there
+            # (Mike, 2026-09-23); if the window happens to end exactly on a
+            # month boundary, start with the following month.
+            end90 = as_of + dt.timedelta(days=90)
+            mstart = dt.date(end90.year, end90.month, 1)
+            if (end90 + dt.timedelta(days=1)).month != end90.month:
+                mstart = end90 + dt.timedelta(days=1)
+            monthly = []
+            for _ in range(6):
+                mnext = dt.date(mstart.year + (mstart.month == 12),
+                                mstart.month % 12 + 1, 1)
+                monthly.append((mstart.isoformat(), mnext.isoformat(),
+                                mstart.strftime("%b %Y")))
+                mstart = mnext
+            chart_monthly = rate_chart(
+                monthly, "Posted nightly rate by month - beyond 90 days")
 
         crit = []
         f = s.get("filters") or {}
@@ -349,7 +374,8 @@ def compsets_list(sets_data, listings, own_calendars=None, as_of=None):
             ],
             "associated": assoc,
             "chart": chart,
-            "columns": ["Comp", "BR", "Sleeps", "Reviews", "Rate Next 90",
+            "chartMonthly": chart_monthly,
+            "columns": ["Comp", "BR", "Sleeps", "Rate Next 90",
                         "Occ Next 90", "APO 365", "ADR 365"],
             "rows": rows,
         })
