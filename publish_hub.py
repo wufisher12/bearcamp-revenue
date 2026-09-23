@@ -292,7 +292,20 @@ def build_doc(run):
     bench = build_benchmarking(run)
     if bench:
         tabs.append(bench)
-    comp = hub_sections.compsets_list(sets_data, listings)
+    # Own posted-rate calendars for the listings each set is compared against.
+    assoc_ids = {a.get("id") for s in sets_data
+                 for a in (s.get("associated") or [])}
+    own_cals = {}
+    if assoc_ids:
+        import gzip
+        p = run.path("price_calendar.jsonl.gz")
+        if os.path.exists(p):
+            with gzip.open(p, "rt", encoding="utf-8") as f:
+                for line in f:
+                    r = json.loads(line)
+                    if r.get("listing_id") in assoc_ids and "error" not in r:
+                        own_cals[r["listing_id"]] = r.get("data")
+    comp = hub_sections.compsets_list(sets_data, listings, own_cals, as_of)
     tabs.append({"id": "compsets", "label": "Comp Sets",
                  "sections": [comp] if comp else []})
 

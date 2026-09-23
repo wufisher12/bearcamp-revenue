@@ -234,6 +234,9 @@ def benchmark(mt, mt_block):
 
 
 # ------------------------------------------------------------- comp sets
+SET_URL = "https://app.usewheelhouse.com/u/sets/%s/overview"
+
+
 def _median(vals):
     vals = sorted(v for v in vals if v is not None)
     if not vals:
@@ -242,17 +245,86 @@ def _median(vals):
     return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2
 
 
-def compsets_list(sets_data, listings):
-    """Every Wheelhouse comp set: a summary block (name + high-level KPIs)
-    that the hub expands into the member comps with OTA links and
-    trailing-year metrics. Fully API-driven - nothing entered by hand."""
+def _cal_window(nights, start_iso, end_iso):
+    """Posted-rate and availability stats for [start, end) of one calendar."""
+    sel = [n for n in nights or [] if start_iso <= n.get("stay_date", "") < end_iso]
+    prices = [n["price"] for n in sel if n.get("price")]
+    open_n = sum(1 for n in sel if n.get("is_available"))
+    return {
+        "avg_price": (sum(prices) / len(prices)) if prices else None,
+        "occ": (1 - open_n / len(sel)) if sel else None,
+        "nights": sel,
+    }
+
+
+def compsets_list(sets_data, listings, own_calendars=None, as_of=None):
+    """Every Wheelhouse comp set, future-first: block cards carry comp count
+    plus next-90 calendar occupancy and posted rate; the detail adds a weekly
+    comp-rate-vs-own chart and a per-comp table. Fully API-driven."""
+    own_calendars = own_calendars or {}
     own_by_id = {l["listing_id"]: l for l in listings}
+    start = as_of.isoformat() if as_of else ""
+    end = (as_of + dt.timedelta(days=90)).isoformat() if as_of else "9999"
+
     out_sets = []
     for s in sets_data or []:
         members = (s.get("members") or {}).get("active") or []
-        occs = [m.get("occupancy_adjusted_365_0") for m in members]
-        adrs = [m.get("adr_365_0") for m in members]
-        med_occ, med_adr = _median(occs), _median(adrs)
+        cal_by_id = {c["listing_id"]: c.get("price_calendar")
+                     for c in s.get("calendars") or []}
+
+        rows, occs, rates = [], [], []
+        for m in sorted(members, key=lambda m: (m.get("title") or "").lower()):
+            w = _cal_window(cal_by_id.get(m.get("listing_id")), start, end)
+            if w["occ"] is not None:
+                occs.append(w["occ"])
+            if w["avg_price"] is not None:
+                rates.append(w["avg_price"])
+            rows.append({"cells": [
+                {"text": (m.get("title") or "?")[:60], "url": m.get("url")},
+                str(m.get("bedrooms") or "-"),
+                str(m.get("sleeps") or "-"),
+                str(m.get("review_count") or "-"),
+                "$%s" % format(round(w["avg_price"]), ",") if w["avg_price"] is not None else "-",
+                "%.0f%%" % (w["occ"] * 100) if w["occ"] is not None else "-",
+                "%.1f%%" % (m["occupancy_adjusted_365_0"] * 100)
+                if m.get("occupancy_adjusted_365_0") is not None else "-",
+                "$%s" % format(round(m["adr_365_0"]), ",") if m.get("adr_365_0") is not None else "-",
+            ]})
+
+        assoc = []
+        for a in s.get("associated") or []:
+            own = own_by_id.get(a.get("id"))
+            assoc.append({
+                "name": (own or {}).get("sheet_name") or a.get("title"),
+                "id": a.get("id"),
+                "whUrl": WH_LISTING_URL % a["wheelhouse_id"] if a.get("wheelhouse_id") else None,
+            })
+
+        # Weekly posted-rate chart: pooled comp median vs own posted rate.
+        chart = None
+        if cal_by_id and as_of:
+            xl, med_series = [], []
+            own_series = {a["id"]: [] for a in assoc if a["id"] in own_calendars}
+            for wk in range(13):
+                ws = as_of + dt.timedelta(days=7 * wk)
+                we = ws + dt.timedelta(days=7)
+                xl.append(ws.strftime("%b %d").replace(" 0", " "))
+                pooled = []
+                for nights in cal_by_id.values():
+                    pooled += [n["price"] for n in nights or []
+                               if ws.isoformat() <= n.get("stay_date", "") < we.isoformat()
+                               and n.get("price")]
+                med_series.append(round(_median(pooled)) if pooled else None)
+                for aid in own_series:
+                    w = _cal_window(own_calendars[aid], ws.isoformat(), we.isoformat())
+                    own_series[aid].append(round(w["avg_price"]) if w["avg_price"] is not None else None)
+            series = [{"name": "Comp median rate", "values": med_series}]
+            for a in assoc:
+                if a["id"] in own_series:
+                    series.append({"name": "%s (posted)" % a["name"],
+                                   "values": own_series[a["id"]]})
+            chart = {"title": "Posted nightly rate by week - next 90 days",
+                     "xLabels": xl, "series": series, "format": "currency"}
 
         crit = []
         f = s.get("filters") or {}
@@ -260,48 +332,25 @@ def compsets_list(sets_data, listings):
             crit.append("/".join(map(str, f["room_type"]["one_of"])))
         if f.get("bedrooms", {}).get("one_of"):
             crit.append("%s BR" % ", ".join(map(str, sorted(f["bedrooms"]["one_of"]))))
-        criteria = " · ".join(crit) if crit else "hand-picked comps"
 
-        assoc = []
-        for a in s.get("associated") or []:
-            own = own_by_id.get(a.get("id"))
-            assoc.append({
-                "name": (own or {}).get("sheet_name") or a.get("title"),
-                "whUrl": WH_LISTING_URL % a["wheelhouse_id"] if a.get("wheelhouse_id") else None,
-            })
-
-        rows = []
-        for m in sorted(members, key=lambda m: -(m.get("revenue_365_0") or 0)):
-            def pct(v):
-                return "%.1f%%" % (v * 100) if v is not None else "-"
-            rows.append({"cells": [
-                {"text": (m.get("title") or "?")[:60], "url": m.get("url")},
-                str(m.get("bedrooms") or "-"),
-                str(m.get("sleeps") or "-"),
-                ("%.1f (%d)" % (m["star_rating"], m.get("review_count") or 0))
-                if m.get("star_rating") is not None else "-",
-                pct(m.get("occupancy_adjusted_365_0")),
-                "$%s" % format(round(m["adr_365_0"]), ",") if m.get("adr_365_0") is not None else "-",
-                "$%s" % format(round(m["revpar_365_0"]), ",") if m.get("revpar_365_0") is not None else "-",
-                pct(m.get("nights_percent_open_90_0")),
-            ]})
-
+        med_occ, med_rate = _median(occs), _median(rates)
         out_sets.append({
             "id": s["id"],
             "name": s.get("name"),
+            "setUrl": SET_URL % s["id"],
             "kind": s.get("kind"),
             "paid": bool(s.get("is_paid")),
             "updated": str(s.get("updated_at") or "")[:10],
-            "criteria": criteria,
-            "counts": s.get("listing_counts") or {},
-            "kpis": {
-                "comps": len(members),
-                "medOcc": "%.1f%%" % (med_occ * 100) if med_occ is not None else "-",
-                "medAdr": "$%s" % format(round(med_adr), ",") if med_adr is not None else "-",
-            },
+            "criteria": " · ".join(crit) if crit else "hand-picked comps",
+            "kpis": [
+                {"label": "Comps", "value": str(len(members))},
+                {"label": "Occ Next 90", "value": "%.0f%%" % (med_occ * 100) if med_occ is not None else "-"},
+                {"label": "Med. Rate Next 90", "value": "$%s" % format(round(med_rate), ",") if med_rate is not None else "-"},
+            ],
             "associated": assoc,
-            "columns": ["Comp", "BR", "Sleeps", "Rating", "APO 365", "ADR 365",
-                        "RevPAR 365", "Open next 90"],
+            "chart": chart,
+            "columns": ["Comp", "BR", "Sleeps", "Reviews", "Rate Next 90",
+                        "Occ Next 90", "APO 365", "ADR 365"],
             "rows": rows,
         })
     if not out_sets:
@@ -309,7 +358,10 @@ def compsets_list(sets_data, listings):
     return {
         "type": "compsetList",
         "sets": out_sets,
-        "note": "Pulled automatically from Wheelhouse each night - create or "
-                "edit comp sets there and they appear here. Comp metrics are "
-                "trailing-year; APO/ADR medians are across active comps.",
+        "note": "Pulled automatically from Wheelhouse each night. Next-90 "
+                "figures come from the comps' live calendars: rate is the "
+                "posted nightly price, occupancy is the share of nights not "
+                "available (booked and blocked are indistinguishable for a "
+                "comp). Trailing metrics are the last 365 days - Wheelhouse "
+                "does not expose per-comp 90-day history.",
     }

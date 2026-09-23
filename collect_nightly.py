@@ -218,12 +218,16 @@ def collect_sets(run, key):
     out = []
     for s in sets if isinstance(sets, list) else []:
         rec = dict(s)
+        # price_calendar: paid sets of <= 25 members only; a 404/422 from a
+        # free or oversized set is expected, recorded, and not a failure.
         for name, endpoint in (("members", "listings"),
-                               ("associated", "associated_listings")):
+                               ("associated", "associated_listings"),
+                               ("calendars", "price_calendar")):
             try:
                 data = wh_api.api_get("/sets/%s/%s" % (s["id"], endpoint), {}, key)
             except RuntimeError as exc:
-                run.fail(s["id"], "set-" + endpoint, exc)
+                if name != "calendars":
+                    run.fail(s["id"], "set-" + endpoint, exc)
                 data = None
             rec[name] = data
             time.sleep(wh_api.REQUEST_PAUSE)
