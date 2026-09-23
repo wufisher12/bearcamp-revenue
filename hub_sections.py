@@ -15,15 +15,19 @@ import datetime as dt
 
 import reservations as R
 
-WH_LISTING_URL = "https://app.usewheelhouse.com/listings/%s"  # verify with Mike
+# Wheelhouse settings deep link, keyed by WH ID (units-defined column B).
+WH_LISTING_URL = "https://app.usewheelhouse.com/l/%s/settings/minimum_price"
 MAPS_URL = "https://www.google.com/maps/search/?api=1&query=%s"
 
+# Nights Available was removed as a KPI (Mike, 2026-09-23): historical
+# owner-block data is not collectable, so the number would be calendar
+# nights, not true availability. The `avail` component stays - it is the
+# denominator for APO and Adj. RevPAR (calendar-night basis, noted).
 KPIS = [
     {"label": "Rent Revenue", "expr": "sum:rent", "format": "currency"},
     {"label": "Rent ADR", "expr": "ratio:rent/booked", "format": "currency"},
     {"label": "APO", "expr": "ratio:booked/avail", "format": "percent"},
     {"label": "Adj. RevPAR", "expr": "ratio:rent/avail", "format": "currency"},
-    {"label": "Nights Available", "expr": "sum:avail", "format": "number"},
     {"label": "Listings", "expr": "count", "format": "number"},
 ]
 
@@ -65,7 +69,7 @@ def listing_table(listings, units_rows, notes_doc):
             "mapsUrl": MAPS_URL % _quote(addr) if u.get("Address") else None,
             "bedrooms": l.get("bedrooms"),
             "absMin": prefs.get("min_price"),
-            "whUrl": WH_LISTING_URL % l["listing_id"],
+            "whUrl": WH_LISTING_URL % l["wh_id"] if l.get("wh_id") else None,
             "tags": _tags(l),
         })
     return {
@@ -177,8 +181,8 @@ def kpi_explorer(rows, listings, as_of, granularity, note_extra=""):
         "groups": out_groups,
         "note": "Active listings only, same-units basis. Rent only, arrival-"
                 "date attribution; last year is on the books as of %s, not "
-                "final. Nights available are calendar nights (owner blocks "
-                "not excluded).%s" % (ly_as_of, note_extra),
+                "final. APO and Adj. RevPAR denominators are calendar nights "
+                "(owner blocks not excluded).%s" % (ly_as_of, note_extra),
     }
 
 
@@ -262,7 +266,7 @@ def compset_shell(listings, kpis):
     return {
         "type": "compset",
         "name": bn.get("sheet_name") or bn.get("title"),
-        "whUrl": WH_LISTING_URL % bn["listing_id"],
+        "whUrl": WH_LISTING_URL % bn["wh_id"] if bn.get("wh_id") else None,
         "criteria": "%s BR · %s · %s. Comps: similar size, private pool, "
                     "Sevierville/Pigeon Forge corridor - selected in Wheelhouse."
                     % (bn.get("bedrooms"), (bn.get("pool") or "no pool"), bn.get("city")),
