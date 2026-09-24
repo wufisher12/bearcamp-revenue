@@ -130,13 +130,13 @@ def active_targets(key):
             "title": (listing.get("title") or "").strip(),
             # BR comes from the sheet, not Wheelhouse - the sheet drives
             # bedroom-size grouping per DATA-CONTRACT.
-            "bedrooms": row.get("BR"),
+            "bedrooms": sheet_access.col(row, "BR"),
             "sheet_name": row.get("Listing Name"),
             "kdd_name": row.get("KDD Name"),
             "city": row.get("City"),
             "pool": row.get("Pool"),
             "jk": str(row.get("JK") or "").strip().lower() == "yes",
-            "airbnb_link": row.get("Airbnb link"),
+            "airbnb_link": sheet_access.col(row, "Link"),
             "listing_preferences": {k: prefs.get(k) for k in PREF_FIELDS},
         })
     return targets, unmatched, meta

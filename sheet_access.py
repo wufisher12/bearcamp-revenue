@@ -100,6 +100,23 @@ def sanitize(src, dst, remove_src=True):
     return {"kept": keep, "dropped": dropped, "path": dst}
 
 
+# Column headers Mike has used over time; read by meaning, not exact name,
+# so a sheet rename (BR -> "# BR", "Airbnb link" -> "Link", 2026-09-24)
+# doesn't silently blank a field across the portfolio.
+COLUMN_ALIASES = {
+    "BR": ("# BR", "BR", "Bedrooms", "# Bedrooms"),
+    "Link": ("Link", "Airbnb link", "Airbnb Link"),
+}
+
+
+def col(row, key):
+    """Row value for a logical column, whatever the sheet calls it today."""
+    for name in COLUMN_ALIASES.get(key, (key,)):
+        if row.get(name) is not None:
+            return row[name]
+    return None
+
+
 # ------------------------------------------------------------------ readers
 
 def _clean(v):
