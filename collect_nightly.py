@@ -247,7 +247,17 @@ def main():
     ap.add_argument("--date")
     ap.add_argument("--limit", type=int, help="collect only the first N listings")
     ap.add_argument("--only", help="comma-separated subset of: %s" % ",".join(ALL_STAGES))
+    ap.add_argument("--skip-if-done", action="store_true",
+                    help="exit 0 without collecting if today already has a "
+                         "good snapshot (for the mid-morning retry trigger)")
     args = ap.parse_args()
+
+    if args.skip_if_done:
+        today = args.date or time.strftime("%Y-%m-%d")
+        if any(e["date"] == today and e.get("status") == store.STATUS_OK
+               for e in store.read_index()):
+            print("collect_nightly: %s already collected - skipping" % today)
+            return
 
     stages = tuple(s.strip() for s in args.only.split(",")) if args.only else ALL_STAGES
     bad = set(stages) - set(ALL_STAGES)

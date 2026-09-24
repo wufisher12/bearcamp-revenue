@@ -8,7 +8,8 @@ if not exist "data\logs" mkdir "data\logs"
 set PYTHONIOENCODING=utf-8
 echo.>> "data\logs\nightly.log"
 echo ===== %DATE% %TIME% =====>> "data\logs\nightly.log"
-"C:\Users\mfish\AppData\Local\Programs\Python\Python312-arm64\python.exe" collect_nightly.py >> "data\logs\nightly.log" 2>&1
+rem --skip-if-done makes the 9:30 AM retry trigger a no-op when 3 AM ran.
+"C:\Users\mfish\AppData\Local\Programs\Python\Python312-arm64\python.exe" collect_nightly.py --skip-if-done >> "data\logs\nightly.log" 2>&1
 echo exit code %ERRORLEVEL%>> "data\logs\nightly.log"
 rem Publish the client dashboard document to the Fisher Family Hub (Firestore).
 rem Skips itself with a log line if the service-account key is not installed.
