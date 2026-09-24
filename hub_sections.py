@@ -266,6 +266,13 @@ def compsets_list(sets_data, listings, own_calendars=None, as_of=None):
     start = as_of.isoformat() if as_of else ""
     end = (as_of + dt.timedelta(days=90)).isoformat() if as_of else "9999"
 
+    # PRIVACY GUARD (Mike, 2026-09-24): the Wheelhouse account holds sets for
+    # multiple clients. Only sets compared against THIS client's listings may
+    # appear on this client's dashboard - client logins see this document.
+    sets_data = [s for s in sets_data or []
+                 if any(a.get("id") in own_by_id
+                        for a in (s.get("associated") or []))]
+
     out_sets = []
     for s in sets_data or []:
         members = (s.get("members") or {}).get("active") or []
