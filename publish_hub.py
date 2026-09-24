@@ -47,7 +47,7 @@ OUT_JSON = os.path.join("data", "hub_dashboard.json")
 MAX_DOC_BYTES = 500_000  # Firestore hard limit is 1 MB
 SECTION_TYPES = {"tiles", "chart", "table", "note",
                  "listingTable", "kpiExplorer", "benchmark", "compset",
-                 "compsetList"}
+                 "compsetList", "reservations"}
 
 
 # ------------------------------------------------------------------ format
@@ -281,9 +281,14 @@ def build_doc(run):
     except FileNotFoundError:
         sets_data = []
 
+    res_section, res_shards = hub_sections.reservations_section(
+        rows, listings, "mfg-client-" + CLIENT_ID, as_of)
+
     tabs = [
         {"id": "listings", "label": "Active Listings",
          "sections": [hub_sections.listing_table(listings, units, NOTES_DOC)]},
+        {"id": "reservations", "label": "Reservations",
+         "sections": [res_section]},
         {"id": "overview", "label": "Overview",
          "sections": [hub_sections.kpi_explorer(rows, listings, as_of, "month")]},
         {"id": "pacing", "label": "Pacing",
@@ -309,8 +314,9 @@ def build_doc(run):
     tabs.append({"id": "compsets", "label": "Comp Sets",
                  "sections": [comp] if comp else []})
 
-    return {"clientId": CLIENT_ID, "label": LABEL,
-            "updated": int(time.time() * 1000), "asOf": run.date, "tabs": tabs}
+    doc = {"clientId": CLIENT_ID, "label": LABEL,
+           "updated": int(time.time() * 1000), "asOf": run.date, "tabs": tabs}
+    return doc, res_shards
 
 
 def validate(doc):
@@ -349,7 +355,7 @@ def _fs_value(v):
     raise TypeError(type(v))
 
 
-def write_firestore(doc):
+def write_firestore(doc, path=DOC_PATH):
     import requests
     from google.oauth2 import service_account
     from google.auth.transport.requests import Request
@@ -359,7 +365,7 @@ def write_firestore(doc):
     creds.refresh(Request())
     project = creds.project_id
     url = ("https://firestore.googleapis.com/v1/projects/%s/databases/(default)/"
-           "documents/%s" % (project, DOC_PATH))
+           "documents/%s" % (project, path))
     body = {"fields": {k: _fs_value(v) for k, v in doc.items()}}
     resp = requests.patch(url, json=body,
                           headers={"Authorization": "Bearer %s" % creds.token},
@@ -375,22 +381,33 @@ def main(argv):
         print("publish_hub: no good snapshot - nothing to publish")
         return 1
     run = runs[0]
-    doc = build_doc(run)
+    doc, shards = build_doc(run)
     raw = validate(doc)
+    shard_sizes = {}
+    for path, payload in shards.items():
+        b = len(json.dumps(payload).encode("utf-8"))
+        assert b < 900_000, "shard %s too large: %d bytes" % (path, b)
+        shard_sizes[path] = b
     with io.open(OUT_JSON, "w", encoding="utf-8", newline="\n") as f:
         json.dump(doc, f, indent=1)
     if dry:
-        print("publish_hub: dry run - %s built from snapshot %s (%d bytes), not written"
-              % (OUT_JSON, run.date, len(raw)))
+        print("publish_hub: dry run - %s built from snapshot %s (%d bytes + "
+              "%d reservation shards %s), not written"
+              % (OUT_JSON, run.date, len(raw), len(shards),
+                 {k.rsplit("-", 1)[-1]: v for k, v in shard_sizes.items()}))
         return 0
     if not os.path.exists(SA_PATH):
         print("publish_hub: skipped - no service account at %s "
               "(set FIREBASE_SERVICE_ACCOUNT or install the key); "
               "%s saved locally" % (SA_PATH, OUT_JSON))
         return 0
+    for path, payload in shards.items():
+        write_firestore(payload, "hub/" + path)
     project = write_firestore(doc)
-    print("publish_hub: wrote %s in %s from snapshot %s - %d bytes, %d tabs, asOf %s"
-          % (DOC_PATH, project, run.date, len(raw), len(doc["tabs"]), doc["asOf"]))
+    print("publish_hub: wrote %s (+%d reservation shards) in %s from snapshot "
+          "%s - %d bytes, %d tabs, asOf %s"
+          % (DOC_PATH, len(shards), project, run.date, len(raw),
+             len(doc["tabs"]), doc["asOf"]))
     return 0
 
 

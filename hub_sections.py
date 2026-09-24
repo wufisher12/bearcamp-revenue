@@ -391,3 +391,96 @@ def compsets_list(sets_data, listings, own_calendars=None, as_of=None):
                 "comp). Trailing metrics are the last 365 days - Wheelhouse "
                 "does not expose per-comp 90-day history.",
     }
+
+
+# ------------------------------------------------------------ reservations
+def _ly_match(res_by_listing, r):
+    """The listing's own booking covering the same date last year: prefer a
+    stay whose range contains check-in minus a year, else the one with the
+    closest check-in within 7 days. None when the listing wasn't booked."""
+    ci = r["check_in"]
+    target = ci.replace(year=ci.year - 1) if not (ci.month == 2 and ci.day == 29) \
+        else ci.replace(year=ci.year - 1, day=28)
+    best, best_gap = None, 8
+    for c in res_by_listing.get(r["listing_id"], []):
+        if c is r or c["check_in"].year != target.year and abs((c["check_in"] - target).days) > 7:
+            continue
+        if c["check_in"] <= target and c["check_out"] and target < c["check_out"]:
+            return c, target
+        gap = abs((c["check_in"] - target).days)
+        if gap < best_gap:
+            best, best_gap = c, gap
+    return best, target
+
+
+def reservations_section(rows, listings, notes_prefix, as_of):
+    """All active stays with check-in on or after 2025-01-01, newest created
+    first, sharded into companion docs by check-in half-year (a single doc
+    cannot hold ~23K rows under Firestore's 1MB cap). Columnar arrays per
+    shard; canceled bookings drop out on every nightly full re-pull. Fee
+    fields never collected (Brightside fee bug), so rent only."""
+    floor = dt.date(2025, 1, 1)
+    live = [r for r in rows if r["is_active"] and r["check_in"] >= floor
+            and r.get("nights") and r["nights"] > 0]
+
+    meta = {l["listing_id"]: l for l in listings}
+    lids = sorted({r["listing_id"] for r in live})
+    lidx = {lid: i for i, lid in enumerate(lids)}
+    listing_lookup = {}
+    for lid in lids:
+        l = meta.get(lid, {})
+        listing_lookup[str(lidx[lid])] = {
+            "n": l.get("sheet_name") or l.get("title") or lid,
+            "br": l.get("bedrooms"),
+            "jk": bool(l.get("jk")),
+        }
+
+    by_listing = {}
+    for r in rows:
+        if r["is_active"]:
+            by_listing.setdefault(r["listing_id"], []).append(r)
+
+    def shard_key(r):
+        return "%dh%d" % (r["check_in"].year, 1 if r["check_in"].month <= 6 else 2)
+
+    shards = {}
+    live.sort(key=lambda r: str(r.get("booked") or ""), reverse=True)
+    preview = []
+    for r in live:
+        ly, _ = _ly_match(by_listing, r)
+        ly_adr = round((ly.get("rent_revenue") or 0) / ly["nights"]) \
+            if ly and ly.get("nights") else None
+        row = [
+            lidx[r["listing_id"]],
+            (r["booked"] or r["check_in"]).isoformat(),
+            r["check_in"].isoformat(),
+            r["nights"],
+            round(r.get("rent_revenue") or 0),
+            ly_adr,
+            ly["check_in"].isoformat() if ly else None,
+            ly["nights"] if ly else None,
+            ((ly["check_in"] - ly["booked"]).days if ly.get("booked") else None) if ly else None,
+        ]
+        s = shards.setdefault(shard_key(r), {"li": [], "cr": [], "ci": [], "ni": [],
+                                             "rr": [], "la": [], "lc": [], "ln": [], "lb": []})
+        for k, v in zip(("li", "cr", "ci", "ni", "rr", "la", "lc", "ln", "lb"), row):
+            s[k].append(v)
+        if len(preview) < 200:
+            preview.append({"c": row})
+
+    shard_docs = {"%s-res-%s" % (notes_prefix, k): v for k, v in sorted(shards.items())}
+    section = {
+        "type": "reservations",
+        "asOf": as_of.isoformat(),
+        "count": len(live),
+        "listings": listing_lookup,
+        "shards": sorted(shard_docs.keys()),
+        "preview": preview,
+        "note": "Active bookings with check-in since 2025-01-01; canceled "
+                "stays drop out automatically on the nightly refresh. Rent "
+                "basis only - fee data stays excluded until the Brightside "
+                "feed is fixed. LY ADR is the same listing's booking covering "
+                "the same date last year (or the nearest check-in within a "
+                "week); hover it for that booking's details.",
+    }
+    return section, shard_docs
