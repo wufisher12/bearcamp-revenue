@@ -445,6 +445,10 @@ def reservations_section(rows, listings, notes_prefix, as_of):
 
     shards = {}
     live.sort(key=lambda r: str(r.get("booked") or ""), reverse=True)
+    # The preview is the initial paint: bookings CREATED in the last 5 days
+    # (Mike, 2026-09-24). Everything else stays in the shards, which the hub
+    # fetches only when a filter, search, sort, or "show all" needs them.
+    preview_floor = (as_of - dt.timedelta(days=4)).isoformat()
     preview = []
     for r in live:
         ly, _ = _ly_match(by_listing, r)
@@ -465,7 +469,7 @@ def reservations_section(rows, listings, notes_prefix, as_of):
                                              "rr": [], "la": [], "lc": [], "ln": [], "lb": []})
         for k, v in zip(("li", "cr", "ci", "ni", "rr", "la", "lc", "ln", "lb"), row):
             s[k].append(v)
-        if len(preview) < 200:
+        if row[1] >= preview_floor and len(preview) < 1500:
             preview.append({"c": row})
 
     shard_docs = {"%s-res-%s" % (notes_prefix, k): v for k, v in sorted(shards.items())}
@@ -476,6 +480,7 @@ def reservations_section(rows, listings, notes_prefix, as_of):
         "listings": listing_lookup,
         "shards": sorted(shard_docs.keys()),
         "preview": preview,
+        "previewDays": 5,
         "note": "Active bookings with check-in since 2025-01-01; canceled "
                 "stays drop out automatically on the nightly refresh. Rent "
                 "basis only - fee data stays excluded until the Brightside "
