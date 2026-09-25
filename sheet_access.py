@@ -117,6 +117,21 @@ def col(row, key):
     return None
 
 
+# Columns that must have a value on essentially every active row. Pool, JK
+# and KDD Name are sparse by nature and deliberately not checked.
+REQUIRED_COLUMNS = ("WH ID", "Listing Name", "City", "Address", "BR", "Link")
+
+
+def dead_columns(rows):
+    """Logical columns that resolve to NO value on every row - the signature
+    of a header rename (like BR -> '# BR' on 2026-09-24), which would
+    otherwise blank a field across the whole dashboard silently."""
+    if not rows:
+        return []
+    return [key for key in REQUIRED_COLUMNS
+            if all(col(r, key) is None for r in rows)]
+
+
 # ------------------------------------------------------------------ readers
 
 def _clean(v):

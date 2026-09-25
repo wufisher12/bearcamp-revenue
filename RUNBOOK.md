@@ -15,7 +15,7 @@ Python is NOT on PATH: `C:/Users/mfish/AppData/Local/Programs/Python/Python312-a
 | **Scope = `units-defined` rows with Status == Active** (287 at 2026-09-15). Not the ~408 Wheelhouse roster. | `collect_nightly.active_targets()` |
 | **Wheelhouse is the source of record for reservations** — it reflects cancellations and refunds; the sheet export does not. Full-year YoY is allowed on this source. | `reservations.py` |
 | The sheet export (`2025-/2026-arrivals`) is a fallback only. YoY on it is **Oct–Dec only**. | `arrivals.yoy()` raises outside that window |
-| `units-defined` and the market tabs stay in the sheet — Mike maintains them. | `sheet_access.py` allowlist |
+| `units-defined` and the market tabs stay in the sheet — Mike maintains them. Column reads are alias-tolerant (`sheet_access.COLUMN_ALIASES`); a required column empty on every row marks the night `partial` so the publisher keeps the last good snapshot. | `sheet_access.py` allowlist, `col()`, `dead_columns()` |
 | Slack doorbell to **#bear-camp** is allowed. Client email is a **Gmail draft, never sent**. Permanent. | `notify.py` |
 | Never read a `logins` tab. | `sheet_access.py` — allowlist + sanitize-on-download |
 

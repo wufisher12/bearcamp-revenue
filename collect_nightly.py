@@ -111,6 +111,15 @@ def active_targets(key):
           % (meta["active_rows"], meta["declared_active_count"],
              meta["declared_matches_actual"]))
 
+    # A column empty on EVERY active row means a header rename, not data.
+    # Recording it as a failure marks the night partial, so the publisher
+    # keeps serving the last good snapshot instead of blanked-out data.
+    meta["dead_columns"] = sheet_access.dead_columns(actives)
+    for c in meta["dead_columns"]:
+        print("  !! SHEET COLUMN ALERT: %r has no value on any of %d active "
+              "rows - header renamed? Update sheet_access.COLUMN_ALIASES."
+              % (c, len(actives)))
+
     listings = wh_api.fetch_listings(key)
     by_whid = {str(l.get("wheelhouse_id")): l for l in listings}
 
@@ -279,6 +288,9 @@ def main():
     for u in unmatched:
         run.fail(u["wh_id"], "units-defined-join",
                  "sheet row %r has no live Wheelhouse listing" % u["listing_name"])
+    for c in sheet_meta.get("dead_columns", []):
+        run.fail("-", "sheet-columns",
+                 "column %r empty on every active row - probable header rename" % c)
 
     run.write_json("listings", targets)
     run.counts["listings"] = len(targets)
