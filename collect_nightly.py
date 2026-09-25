@@ -291,6 +291,9 @@ def main():
     for c in sheet_meta.get("dead_columns", []):
         run.fail("-", "sheet-columns",
                  "column %r empty on every active row - probable header rename" % c)
+    if sheet_meta.get("dead_columns"):
+        import notify
+        notify.post(notify.build_alert(sheet_meta["dead_columns"], run.date))
 
     run.write_json("listings", targets)
     run.counts["listings"] = len(targets)

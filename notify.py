@@ -33,6 +33,21 @@ DASHBOARD_URL = "https://wufisher12.github.io/bearcamp-revenue/"
 PENDING = os.path.join("data", "pending_slack.json")
 
 WEBHOOK_ENV = "SLACK_WEBHOOK_URL"
+# The nightly runs headless under Task Scheduler, where a shell env var may
+# not be set - a gitignored key file works there (same pattern as the
+# Wheelhouse key). One line: the webhook URL.
+WEBHOOK_FILE = os.path.join("data", "slack_webhook.txt")
+
+
+def _webhook_url():
+    url = os.environ.get(WEBHOOK_ENV, "").strip()
+    if url:
+        return url
+    try:
+        with open(WEBHOOK_FILE, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
 
 
 def build_message(checklist_count, run_date, coverage=None, warnings=None):
@@ -53,12 +68,25 @@ def build_message(checklist_count, run_date, coverage=None, warnings=None):
     return "\n".join(lines)
 
 
+def build_alert(dead_columns, run_date):
+    """Sheet-health alert (Mike, 2026-09-25) - same thin-doorbell rules:
+    column NAMES only, never cell data."""
+    return "\n".join([
+        ":rotating_light: *Bear Camp — sheet column alert*",
+        "Empty on every active row: %s (probable header rename in "
+        "units-defined)." % ", ".join(dead_columns),
+        "The dashboard keeps serving the last good snapshot until the "
+        "header is fixed or the alias map is updated.",
+        "_Nightly run %s marked partial._" % run_date,
+    ])
+
+
 def post(message):
     """Send via webhook if configured; otherwise queue for the Claude task.
 
     Returns True if actually delivered.
     """
-    url = os.environ.get(WEBHOOK_ENV, "").strip()
+    url = _webhook_url()
     if not url:
         os.makedirs("data", exist_ok=True)
         with open(PENDING, "w", encoding="utf-8", newline="\n") as f:
